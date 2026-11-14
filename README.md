@@ -40,15 +40,4 @@ Restart Steam if the library does not pick up a change.
 > [!NOTE]
 > Steam has no custom icon slot for its own games, so icons are download-only. Animated artwork is listed without a preview.
 
-## Development
-
-```pwsh
-prek install
-prek run --all-files
-cargo test --manifest-path packages/core/Cargo.toml
-scripts/pin-actions.sh  # pin workflow actions to commit hashes, needs pinact
-```
-
-To release, add a `## [x.y.z]` section to `CHANGELOG.md`, bump the version in `Cargo.toml` and the csproj, and push a `vx.y.z` tag.
-
 Not affiliated with Valve or SteamGridDB.
