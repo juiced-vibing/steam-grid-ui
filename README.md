@@ -1,4 +1,4 @@
-# steam-grid-ui
+# <img src="assets/app/main.png" alt="steam-grid-ui icon" height="28" width="28"> steam-grid-ui
 
 Windows app that browses [SteamGridDB](https://www.steamgriddb.com/) artwork for the games in your Steam library and applies it: portrait and wide grids, heroes and logos. Icons can be saved to disk.
 
@@ -36,15 +36,15 @@ The second line is the MSVC linker Rust needs; skip it if you already build Rust
 ```pwsh
 git clone https://github.com/juiced-vibing/steam-grid-ui.git
 cd steam-grid-ui
-dotnet run --project packages/app -c Release    # builds the Rust core first
-dotnet publish packages/app -c Release -o dist  # one exe with the core inside
+dotnet run --project packages/app -c Release     # builds the Rust core first
+dotnet publish packages/app -c Release -o dist   # one exe with the core inside
 ```
 
 The installer needs [Inno Setup](https://jrsoftware.org/isinfo.php):
 
 ```pwsh
 winget install JRSoftware.InnoSetup
-scripts/build-installer.ps1 -Version 0.1.0      # dist/SteamGridUI-0.1.0-setup.exe
+scripts/build-installer.ps1 -Version 0.1.0   # dist/SteamGridUI-0.1.0-setup.exe
 ```
 
 The key can also come from a `.env` at the repo root (see `.env.example`) or the `SGDB_API_KEY` environment variable, both of which win over the saved key.

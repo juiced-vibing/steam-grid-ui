@@ -20,6 +20,7 @@ steam-grid-ui is a Windows app that browses SteamGridDB artwork for the games in
 | `packages/app/`              | WPF frontend, net10, fluent theme, plain code-behind (no MVVM)                      |
 | `packages/app/Protocol.cs`   | the C# mirror of the core's requests, replies and error codes                       |
 | `packages/app/Native.cs`     | the P/Invoke side: `Native.Send(request)`                                           |
+| `assets/`                    | `app/` the icon (`main.ico`, `main.png`), `installer/` the setup wizard images      |
 | `installer/SteamGridUI.iss`  | Inno Setup script; fetches the .NET 10 Desktop Runtime when it is missing           |
 | `.github/workflows/`         | `ci.yml` (push and PR to `main`), `release.yml` (on a `v*` tag)                     |
 
