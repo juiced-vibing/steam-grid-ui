@@ -7,9 +7,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
+    <Version>0.1.0</Version>
     <AssemblyName>SteamGridUI</AssemblyName>
     <RootNamespace>SteamGridUI</RootNamespace>
     <CoreDir>$(MSBuildProjectDirectory)\..\core</CoreDir>
+  </PropertyGroup>
+
+  <!-- `dotnet publish` gives one exe with the Rust core inside; it needs the .NET Desktop Runtime. -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
   </PropertyGroup>
 
   <!-- The Rust backend is built as part of the C# build and copied next to the exe. -->
