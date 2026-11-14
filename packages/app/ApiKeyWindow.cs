@@ -6,7 +6,6 @@ using System.Windows.Media;
 
 namespace SteamGridUI;
 
-/// <summary>Small dialog that collects and verifies the user's SteamGridDB API key</summary>
 public sealed class ApiKeyWindow : Window
 {
     private const string KeyPage = "https://www.steamgriddb.com/profile/preferences/api";

@@ -2,15 +2,12 @@ using System.Text.Json.Serialization;
 
 namespace SteamGridUI;
 
-/// <summary>What SteamGridDB can be asked for</summary>
 public enum ArtKind { Grid, Wide, Hero, Logo, Icon }
 
-/// <summary>The kinds Steam has a custom-art slot for; there is none for icons</summary>
 public enum Slot { Grid, Wide, Hero, Logo }
 
 public static class ArtKinds
 {
-    /// <summary>The Steam slot a kind is applied to, or null when it can only be saved to disk</summary>
     public static Slot? Slot(this ArtKind kind) => kind switch
     {
         ArtKind.Grid => SteamGridUI.Slot.Grid,
@@ -34,7 +31,6 @@ public static class ArtKinds
     };
 }
 
-/// <summary>A request to the backend that knows the type of its reply</summary>
 public abstract record Request<TReply>([property: JsonIgnore] string Method);
 
 public sealed record Init() : Request<InitReply>("init");
@@ -56,7 +52,6 @@ public sealed record SaveAs(string Url, string Dest) : Request<Nothing>("save_as
 
 public sealed record BackupDir() : Request<PathReply>("backup_dir");
 
-/// <summary>The reply of a request that only succeeds or fails</summary>
 public sealed record Nothing
 {
     public static readonly Nothing Value = new();
@@ -85,11 +80,9 @@ public abstract record AssetPage(string? GameName)
 {
     public sealed record Known(List<Asset> Items, bool More, string? GameName) : AssetPage(GameName);
 
-    /// <summary>SteamGridDB has no entry for the appid</summary>
     public sealed record Unknown(string? GameName) : AssetPage(GameName);
 }
 
-/// <summary>One piece of artwork; Preview is null for animated artwork, which has no still image</summary>
 public sealed record Asset(string Url, string? Preview, int Width, int Height, string? Style, string? Author);
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "outcome")]
@@ -99,7 +92,6 @@ public abstract record Placed(string Path)
 {
     public sealed record Applied(string Path, int Replaced) : Placed(Path);
 
-    /// <summary>The slot already held this exact image</summary>
     public sealed record Unchanged(string Path) : Placed(Path);
 }
 
@@ -107,10 +99,8 @@ public sealed record PathReply(string Path);
 
 public sealed record ClearReply(int Removed);
 
-/// <summary>Why a request failed; mirrors Error::code in sgdb_core</summary>
 public enum ErrorCode
 {
-    /// <summary>A code this build does not know, or a reply that could not be read</summary>
     Unknown,
     BadRequest,
     NoApiKey,
@@ -125,7 +115,6 @@ public enum ErrorCode
     Internal,
 }
 
-/// <summary>A failed request: a code to act on and a message already worded for the user</summary>
 public sealed class BackendException(ErrorCode code, string message) : Exception(message)
 {
     public ErrorCode Code { get; } = code;

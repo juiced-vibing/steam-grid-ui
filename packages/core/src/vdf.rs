@@ -5,7 +5,6 @@ pub enum Vdf {
 }
 
 impl Vdf {
-    /// Case-insensitive child lookup (Steam is inconsistent about key casing)
     pub fn get(&self, key: &str) -> Option<&Vdf> {
         match self {
             Vdf::Obj(v) => v.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v),

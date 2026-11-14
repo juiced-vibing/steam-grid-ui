@@ -31,7 +31,6 @@ use crate::types::UserId;
 const THUMB_CACHE_MAX: u64 = 256 * 1024 * 1024;
 const KEY_CHECK_APP: u32 = 440;
 
-/// Everything the frontend can ask for; a request that parses is a request that is valid
 #[derive(Debug, Deserialize)]
 #[serde(tag = "method", content = "args", rename_all = "snake_case")]
 enum Request {
@@ -49,7 +48,6 @@ enum Request {
         page: u32,
         #[serde(flatten)]
         filters: Filters,
-        /// Also look up the game's name, for a game Steam could not name
         #[serde(default)]
         need_name: bool,
     },
@@ -95,8 +93,9 @@ enum AssetPage {
         more: bool,
         game_name: Option<String>,
     },
-    /// `SteamGridDB` has no entry for the appid
-    Unknown { game_name: Option<String> },
+    Unknown {
+        game_name: Option<String>,
+    },
 }
 
 #[derive(Serialize)]

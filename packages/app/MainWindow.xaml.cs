@@ -13,7 +13,6 @@ namespace SteamGridUI;
 
 public partial class MainWindow : Window
 {
-    /// <summary>What the artwork list is showing: one kind of art for one game of one account</summary>
     private sealed record Target(User User, GameItem Game, ArtKind Kind);
 
     private readonly ObservableCollection<AssetItem> _assets = [];
@@ -48,7 +47,6 @@ public partial class MainWindow : Window
 
     private void SetStatus(string text) => Status.Text = text;
 
-    /// <summary>Every failure ends up here, so each kind is handled once</summary>
     private void Report(Exception error)
     {
         switch (error)
@@ -72,7 +70,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Run UI work from an event handler, sending whatever it throws to Report</summary>
     private async void Run(Func<Task> work)
     {
         try
@@ -86,7 +83,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Run with the action buttons disabled until the work is done</summary>
     private void RunAction(Func<Task> work) => Run(async () =>
     {
         Actions.IsEnabled = false;

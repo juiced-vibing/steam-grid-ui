@@ -13,7 +13,6 @@ public abstract class Observable : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-/// <summary>A game in the list; its name and custom slots change while the app runs</summary>
 public sealed class GameItem(Game game) : Observable
 {
     private readonly HashSet<Slot> _custom = [.. game.Custom];
@@ -22,7 +21,6 @@ public sealed class GameItem(Game game) : Observable
     public string AppId { get; } = game.Appid;
     public bool Installed { get; } = game.Installed;
 
-    /// <summary>Null until Steam or SteamGridDB has named the game</summary>
     public string? Name
     {
         get => _name;
@@ -58,7 +56,6 @@ public sealed class GameItem(Game game) : Observable
     }
 }
 
-/// <summary>What a tile shows in place of, or as, its image</summary>
 public abstract record Preview
 {
     public sealed record Loading : Preview;
@@ -68,7 +65,6 @@ public abstract record Preview
     public sealed record Unavailable(string Reason) : Preview;
 }
 
-/// <summary>A piece of artwork in the list</summary>
 public sealed class AssetItem : Observable
 {
     private Preview _preview;
@@ -94,7 +90,6 @@ public sealed class AssetItem : Observable
     public double TileW { get; }
     public double TileH { get; }
 
-    /// <summary>File extension of the full image, with its dot</summary>
     public string Extension => Path.GetExtension(new Uri(Asset.Url).AbsolutePath);
 
     public Preview Preview

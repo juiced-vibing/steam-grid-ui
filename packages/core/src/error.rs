@@ -4,7 +4,6 @@ use thiserror::Error as ThisError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Everything that can go wrong; the message is shown to the user as it is
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("bad request: {0}")]
@@ -45,13 +44,11 @@ pub enum Error {
 }
 
 impl Error {
-    /// For `map_err` on an I/O result: `fs::write(..).map_err(Error::io("saving the config"))`
     pub fn io(context: impl Into<String>) -> impl FnOnce(io::Error) -> Self {
         let context = context.into();
         move |source| Self::Io { context, source }
     }
 
-    /// Stable identifier the frontend switches on, so it never has to read the message
     pub const fn code(&self) -> &'static str {
         match self {
             Self::BadRequest(_) => "bad_request",

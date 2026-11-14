@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 
 namespace SteamGridUI;
 
-/// <summary>Bridge to sgdb_core.dll: one blocking JSON-in/JSON-out call, run off the UI thread</summary>
 internal static class Native
 {
     private static readonly JsonSerializerOptions Json = new()
@@ -22,7 +21,6 @@ internal static class Native
 
     private static byte[] CString(string s) => Encoding.UTF8.GetBytes(s + "\0");
 
-    /// <summary>Run a request; it returns its typed reply or throws a BackendException</summary>
     public static Task<TReply> Send<TReply>(Request<TReply> request) => Task.Run(() =>
     {
         var args = JsonSerializer.Serialize(request, request.GetType(), Json);

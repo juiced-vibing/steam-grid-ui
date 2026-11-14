@@ -45,11 +45,9 @@ static AGENT: LazyLock<Agent> = LazyLock::new(|| {
 
 static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(Mutex::default);
 
-/// One piece of artwork, as the frontend gets it
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Asset {
     pub url: AssetUrl,
-    /// Still image to show in the list; animated artwork has none
     pub preview: Option<AssetUrl>,
     pub width: u32,
     pub height: u32,
@@ -82,7 +80,6 @@ impl Asset {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page {
     pub items: Vec<Asset>,
-    /// Whether asking for the next page can return anything
     pub more: bool,
 }
 
@@ -147,7 +144,6 @@ fn get(key: &ApiKey, path: &str, query: &[(&str, &str)]) -> Result<Option<Value>
     Ok(Some(body))
 }
 
-/// Name of the game `SteamGridDB` associates with a Steam appid, if it knows the game
 pub fn game_name(key: &ApiKey, app: AppId) -> Result<Option<String>> {
     let body = get(key, &format!("/games/steam/{app}"), &[])?;
 
@@ -179,7 +175,6 @@ fn remember_page(cache_key: String, page: &Page) {
     pages.insert(cache_key, (Instant::now(), page.clone()));
 }
 
-/// Drop every cached page, for when the answers may differ (a new API key)
 pub fn forget_pages() {
     PAGES.lock().unwrap_or_else(PoisonError::into_inner).clear();
 }
@@ -199,7 +194,6 @@ fn page_key(path: &str, query: &[(&str, &str)]) -> String {
     format!("{path}?{}", pairs.join("&"))
 }
 
-/// One page of artwork for a Steam appid; `None` when `SteamGridDB` does not know the game
 pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filters) -> Result<Option<Page>> {
     let (endpoint, dimensions) = endpoint(kind);
 
@@ -230,7 +224,6 @@ pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filte
     Ok(Some(page))
 }
 
-/// Download to a temp file next to `dest`, then move it into place
 pub fn download(url: &AssetUrl, dest: &Path) -> Result<()> {
     let response = AGENT
         .get(url.as_str())

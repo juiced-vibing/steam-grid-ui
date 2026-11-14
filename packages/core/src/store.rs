@@ -35,7 +35,6 @@ pub fn sub_dir(name: &str) -> PathBuf {
 pub struct Config {
     #[serde(default)]
     pub api_key: String,
-    /// Optional override when Steam isn't in the registry
     #[serde(default)]
     pub steam_path: Option<String>,
 }
@@ -52,7 +51,6 @@ pub fn save_config(cfg: &Config) -> Result<()> {
     fs::write(app_dir().join("config.json"), text).map_err(Error::io("saving the settings"))
 }
 
-/// appid -> game name, for owned games that aren't installed (no manifest to read)
 pub fn load_names() -> HashMap<AppId, String> {
     fs::read_to_string(app_dir().join("names.json"))
         .ok()
@@ -74,7 +72,6 @@ pub fn remember_name(app: AppId, name: &str) {
     }
 }
 
-/// Delete the least recently written files in `dir` once it holds more than `max_bytes`
 pub fn prune_dir(dir: &Path, max_bytes: u64) -> usize {
     let Ok(entries) = fs::read_dir(dir) else { return 0 };
 
@@ -136,7 +133,6 @@ fn dotenv(name: &str) -> Option<String> {
         })
 }
 
-/// The API key to use: process environment, then `.env`, then the key saved from the UI
 pub fn api_key() -> Option<ApiKey> {
     std::env::var(KEY_VAR)
         .ok()

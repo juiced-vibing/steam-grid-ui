@@ -24,7 +24,6 @@ use crate::vdf;
 const BACKUPS_PER_SLOT: usize = 3;
 const HIDDEN_APPS: &[u32] = &[228_980];
 
-/// What Steam itself writes when a logo is first placed: bottom left, half the hero
 const DEFAULT_LOGO_POSITION: &str =
     r#"{"nVersion":1,"logoPosition":{"pinnedPosition":"BottomLeft","nWidthPct":50,"nHeightPct":50}}"#;
 
@@ -37,14 +36,11 @@ pub struct User {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Game {
     pub appid: AppId,
-    /// Unknown for a game that is not installed, until `SteamGridDB` is asked about it
     pub name: Option<String>,
     pub installed: bool,
-    /// Slots that hold custom artwork
     pub custom: Vec<Slot>,
 }
 
-/// A Steam installation that exists on disk
 #[derive(Debug)]
 pub struct Steam {
     root: PathBuf,
@@ -81,7 +77,6 @@ impl Steam {
         &self.root
     }
 
-    /// Accounts that have signed in on this machine, the most recent first
     pub fn users(&self) -> Vec<User> {
         // account id (userdata folder name) -> (persona, most recent)
         let mut known: HashMap<u32, (String, bool)> = HashMap::new();
@@ -151,7 +146,6 @@ impl Steam {
         libs
     }
 
-    /// Installed games by name, then everything else the account has touched
     pub fn games(&self, user: UserId, names: &HashMap<AppId, String>) -> Vec<Game> {
         // appid -> (name, installed)
         let mut found: BTreeMap<u32, (Option<String>, bool)> = BTreeMap::new();
@@ -232,7 +226,6 @@ impl Steam {
         out
     }
 
-    /// The folder Steam reads one account's custom artwork from
     pub fn grid(&self, user: UserId, backup_root: &Path) -> GridDir {
         let user = user.to_string();
         GridDir {
@@ -242,7 +235,6 @@ impl Steam {
     }
 }
 
-/// A download waiting to be put in a slot; the file is removed if that never happens
 #[derive(Debug)]
 pub struct Staged {
     path: PathBuf,
@@ -261,18 +253,11 @@ impl Drop for Staged {
     }
 }
 
-/// What putting an image in a slot did
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Placed {
-    Applied {
-        path: PathBuf,
-        replaced: usize,
-    },
-    /// The slot already held this exact image
-    Unchanged {
-        path: PathBuf,
-    },
+    Applied { path: PathBuf, replaced: usize },
+    Unchanged { path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -282,7 +267,6 @@ pub struct GridDir {
 }
 
 impl GridDir {
-    /// Stems of every custom image, the form `Slot::file_stem` produces
     fn art_stems(&self) -> HashSet<String> {
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return HashSet::new();
@@ -296,7 +280,6 @@ impl GridDir {
             .collect()
     }
 
-    /// Custom images currently in one slot, whatever their format
     fn occupants(&self, stem: &str) -> Vec<PathBuf> {
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
@@ -314,7 +297,6 @@ impl GridDir {
             .collect()
     }
 
-    /// Where to download an image before it replaces anything
     pub fn stage(&self, app: AppId, slot: Slot) -> Result<Staged> {
         fs::create_dir_all(&self.dir).map_err(Error::io(format!("creating {}", self.dir.display())))?;
 
@@ -323,7 +305,6 @@ impl GridDir {
         })
     }
 
-    /// Put a staged download in its slot, backing up what was there
     #[expect(clippy::needless_pass_by_value, reason = "placing uses up the staged download")]
     pub fn place(&self, staged: Staged, app: AppId, slot: Slot, format: ImageFormat) -> Result<Placed> {
         let stem = slot.file_stem(app);
@@ -343,10 +324,7 @@ impl GridDir {
         Ok(Placed::Applied { path, replaced })
     }
 
-    /// Steam draws a custom logo only where `<appid>.json` says to
-    ///
-    /// Games with an official logo inherit its position; the others (sub-apps like a multiplayer mode) have none and
-    /// show nothing. A position the user set in Steam is left alone
+    // steam only draws a custom logo where <appid>.json says to; a game without an official logo has no position
     fn ensure_logo_position(&self, app: AppId) -> Result<()> {
         let path = self.dir.join(format!("{app}.json"));
         if path.exists() {
@@ -356,7 +334,6 @@ impl GridDir {
         fs::write(&path, DEFAULT_LOGO_POSITION).map_err(Error::io(format!("writing {}", path.display())))
     }
 
-    /// Move whatever is in a slot to the backup folder instead of deleting it
     pub fn clear(&self, app: AppId, slot: Slot) -> Result<usize> {
         let stem = slot.file_stem(app);
         let files = self.occupants(&stem);
@@ -385,7 +362,6 @@ impl GridDir {
     }
 }
 
-/// Keep only the newest `keep` backups of one slot; backups are named `<unix time>_<slot file>`
 fn prune_backups(dir: &Path, stem: &str, keep: usize) -> usize {
     let Ok(entries) = fs::read_dir(dir) else { return 0 };
 
@@ -407,7 +383,6 @@ fn prune_backups(dir: &Path, stem: &str, keep: usize) -> usize {
         .count()
 }
 
-/// Whether two files hold the same bytes
 fn same_content(a: &Path, b: &Path) -> bool {
     let len = |path: &Path| fs::metadata(path).map(|m| m.len()).ok();
     len(a).is_some() && len(a) == len(b) && fs::read(a).ok() == fs::read(b).ok()

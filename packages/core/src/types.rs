@@ -43,19 +43,11 @@ macro_rules! numeric_id {
     };
 }
 
-numeric_id!(
-    /// Steam application id
-    AppId,
-    "appid"
-);
+numeric_id!(AppId, "appid");
 
-numeric_id!(
-    /// Steam account id, the folder name under `userdata`
-    UserId,
-    "user"
-);
+numeric_id!(UserId, "user");
 
-/// A non-empty `SteamGridDB` API key
+// not Debug, so it cannot end up in a log
 #[derive(Clone)]
 pub struct ApiKey(String);
 
@@ -70,7 +62,6 @@ impl ApiKey {
     }
 }
 
-/// What `SteamGridDB` can be asked for
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtKind {
@@ -81,7 +72,6 @@ pub enum ArtKind {
     Icon,
 }
 
-/// The kinds Steam has a custom-art slot for; there is none for icons
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Slot {
@@ -94,7 +84,6 @@ pub enum Slot {
 impl Slot {
     pub const ALL: [Self; 4] = [Self::Grid, Self::Wide, Self::Hero, Self::Logo];
 
-    /// File name, without extension, that Steam reads this slot from
     pub fn file_stem(self, app: AppId) -> String {
         match self {
             Self::Grid => format!("{app}p"),
@@ -105,7 +94,6 @@ impl Slot {
     }
 }
 
-/// Image formats Steam picks up from the grid folder
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
     Png,
@@ -142,7 +130,6 @@ impl ImageFormat {
     }
 }
 
-/// An https URL on a `SteamGridDB` host; nothing else is ever downloaded
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct AssetUrl(String);
@@ -180,7 +167,6 @@ impl AssetUrl {
         path.rsplit('/').next().unwrap_or("")
     }
 
-    /// Extension of the file behind the URL, as written
     pub fn ext(&self) -> Option<&str> {
         let (_, ext) = self.last_segment().rsplit_once('.')?;
         (!ext.is_empty() && ext.len() <= 5 && ext.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(ext)
@@ -190,7 +176,6 @@ impl AssetUrl {
         self.ext().and_then(ImageFormat::from_ext)
     }
 
-    /// Last path segment reduced to characters that are safe in a file name
     pub fn file_name(&self) -> Option<String> {
         let name: String = self
             .last_segment()
