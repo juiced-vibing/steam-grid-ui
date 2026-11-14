@@ -15,3 +15,6 @@ obj/
 
 ### LLMs ###
 .claude/
+
+### Secrets ###
+.env

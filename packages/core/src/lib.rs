@@ -39,7 +39,7 @@ fn id_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
 }
 
 fn api_key() -> Result<String, String> {
-    let key = store::load_config().api_key;
+    let key = store::api_key();
     if key.is_empty() {
         Err("No SteamGridDB API key set. Add one under \"API key…\".".into())
     } else {
@@ -127,7 +127,7 @@ fn dispatch(method: &str, args: &Value) -> Result<Value, String> {
             let steam = steam::steam_path(&cfg);
             let users = steam.as_deref().map_or_default(steam::users);
             Ok(json!({
-                "api_key_set": !cfg.api_key.is_empty(),
+                "api_key_set": !store::api_key().is_empty(),
                 "steam_path": steam.as_deref().ok().map(show),
                 "steam_error": steam.as_ref().err(),
                 "users": users,
