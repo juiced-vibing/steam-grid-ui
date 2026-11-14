@@ -6,27 +6,30 @@ steam-grid-ui is a Windows app that browses SteamGridDB artwork for the games in
 
 ## Layout
 
-| path                         | contents                                                                            |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| `packages/core/`             | Rust `cdylib` (`sgdb_core.dll`): all logic and I/O                                  |
-| `packages/core/src/lib.rs`   | the C ABI (`sgdb_call`, `sgdb_free`), the `Request` enum and its handlers           |
-| `packages/core/src/types.rs` | values checked once where they enter: ids, `ApiKey`, `Slot`, `AssetUrl`             |
-| `packages/core/src/error.rs` | the one `Error` enum (thiserror); each variant has a user message and a stable code |
-| `packages/core/src/steam.rs` | `Steam` (install, accounts, library) and `GridDir` (art slots and their backups)    |
-| `packages/core/src/sgdb.rs`  | SteamGridDB API v2 client, the page cache and downloads                             |
-| `packages/core/src/store.rs` | `%APPDATA%\SteamGridUI`: config, name cache, thumbnails; API key lookup (`.env`)    |
-| `packages/core/src/vdf.rs`   | parser for Valve's text KeyValues files (`.vdf`, `.acf`)                            |
-| `packages/core/tests/`       | the unit tests of each module                                                       |
-| `packages/app/`              | WPF frontend, net10, fluent theme, plain code-behind (no MVVM)                      |
-| `packages/app/Protocol.cs`   | the C# mirror of the core's requests, replies and error codes                       |
-| `packages/app/Native.cs`     | the P/Invoke side: `Native.Send(request)`                                           |
-| `assets/`                    | `app/` the icon (`main.ico`, `main.png`), `installer/` the setup wizard images      |
-| `installer/SteamGridUI.iss`  | Inno Setup script; fetches the .NET 10 Desktop Runtime when it is missing           |
-| `.github/workflows/`         | `ci.yml` (push and PR to `main`), `release.yml` (on a `v*` tag)                     |
+| path                            | contents                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| `packages/core/`                | Rust `cdylib` (`sgdb_core.dll`): all logic and I/O                                  |
+| `packages/core/src/lib.rs`      | the C ABI (`sgdb_call`, `sgdb_free`) and the handler of each request                |
+| `packages/core/src/protocol.rs` | the `Request` enum and the reply types, mirrored by `Protocol.cs`                   |
+| `packages/core/src/types.rs`    | values checked once where they enter: ids, `ApiKey`, `Slot`, `AssetUrl`             |
+| `packages/core/src/error.rs`    | the one `Error` enum (thiserror); each variant has a user message and a stable code |
+| `packages/core/src/steam.rs`    | `Steam`: the install, its accounts and the library                                  |
+| `packages/core/src/grid.rs`     | `GridDir`: the art slots of one account and their backups                           |
+| `packages/core/src/sgdb.rs`     | SteamGridDB API v2 client and downloads                                             |
+| `packages/core/src/cache.rs`    | artwork pages kept in memory for ten minutes                                        |
+| `packages/core/src/store.rs`    | `%APPDATA%\SteamGridUI`: config, name cache, thumbnails; API key lookup (`.env`)    |
+| `packages/core/src/vdf.rs`      | parser for Valve's text KeyValues files (`.vdf`, `.acf`)                            |
+| `packages/core/tests/`          | the unit tests of each module                                                       |
+| `packages/app/`                 | WPF frontend, net10, fluent theme, plain code-behind (no MVVM)                      |
+| `packages/app/Protocol.cs`      | the C# mirror of the core's requests, replies and error codes                       |
+| `packages/app/Native.cs`        | the P/Invoke side: `Native.Send(request)`                                           |
+| `assets/`                       | `app/` the icon (`main.ico`, `main.png`), `installer/` the setup wizard images      |
+| `installer/SteamGridUI.iss`     | Inno Setup script; fetches the .NET 10 Desktop Runtime when it is missing           |
+| `.github/workflows/`            | `ci.yml` (push and PR to `main`), `release.yml` (on a `v*` tag)                     |
 
 The frontend never touches Steam files or the network. It calls `Native.Send(new SomeRequest(…))`, which runs `sgdb_call` off the UI thread and returns the typed reply that request declares, or throws a `BackendException` with an `ErrorCode`. On the wire it is JSON: `{"ok":true,"data":…}` or `{"ok":false,"error":{"code":"…","message":"…"}}`.
 
-A new feature is a variant of `Request` in `lib.rs` with its arm in `handle`, and the matching record in `Protocol.cs`. A new failure is a variant of `Error` with its code, and the same name in `ErrorCode`.
+A new feature is a variant of `Request` in `protocol.rs` with its arm in `handle` (`lib.rs`), and the matching record in `Protocol.cs`. A new failure is a variant of `Error` with its code, and the same name in `ErrorCode`.
 
 ## Commands
 
@@ -52,6 +55,7 @@ The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses un
 - Rust: edition 2024, the lint table in `packages/core/Cargo.toml` must pass with `-D warnings`. `unsafe` only at the C ABI, each use under `#[expect(unsafe_code, reason = "…")]`.
 - Unit tests live in `packages/core/tests/<module>.rs`, pulled into the module with `#[cfg(test)] #[path = "../tests/<module>.rs"] mod tests;`. `autotests = false` keeps cargo from building them as integration tests.
 - Tests are for edge cases and invariants (bad input, limits, what must not happen), not for restating the code. The C# side has none: keep logic in the core.
+- Files: split a file when it holds two responsibilities, not at a line count; around 250 lines is the point to check.
 - Comments: no docstrings on anything that is not public API, and few comments at all. A short `//` line only where the reason is not obvious from the code; lower case, no trailing period.
 - Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId` and `UserId` are numbers, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums with data (`Placed`, `AssetPage`, `SteamState`, `Preview`) rather than flags and nullable fields.
 - Errors: return `error::Result`, add context with `Error::io("doing what")`. The message is shown to the user as it is, so word it for a person. The frontend decides what to do from the code, never from the message, and handles every failure in `MainWindow.Report`.

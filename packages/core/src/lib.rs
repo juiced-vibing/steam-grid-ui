@@ -1,4 +1,7 @@
+mod cache;
 mod error;
+mod grid;
+mod protocol;
 mod sgdb;
 mod steam;
 mod store;
@@ -8,105 +11,24 @@ mod vdf;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::c_char;
-use std::path::PathBuf;
 
-use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
 
 use crate::error::Error;
 use crate::error::Result;
-use crate::sgdb::Asset;
-use crate::sgdb::Filters;
+use crate::protocol::AssetPage;
+use crate::protocol::ClearReply;
+use crate::protocol::InitReply;
+use crate::protocol::PathReply;
+use crate::protocol::Request;
+use crate::protocol::SteamState;
 use crate::steam::Steam;
-use crate::steam::User;
 use crate::types::ApiKey;
-use crate::types::AppId;
-use crate::types::ArtKind;
-use crate::types::AssetUrl;
-use crate::types::Slot;
-use crate::types::UserId;
 
 const THUMB_CACHE_MAX: u64 = 256 * 1024 * 1024;
 const KEY_CHECK_APP: u32 = 440;
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "method", content = "args", rename_all = "snake_case")]
-enum Request {
-    Init {},
-    SetApiKey {
-        key: String,
-    },
-    ListGames {
-        user: UserId,
-    },
-    ListAssets {
-        appid: AppId,
-        kind: ArtKind,
-        #[serde(default)]
-        page: u32,
-        #[serde(flatten)]
-        filters: Filters,
-        #[serde(default)]
-        need_name: bool,
-    },
-    Thumb {
-        url: AssetUrl,
-    },
-    Apply {
-        user: UserId,
-        appid: AppId,
-        slot: Slot,
-        url: AssetUrl,
-    },
-    Clear {
-        user: UserId,
-        appid: AppId,
-        slot: Slot,
-    },
-    SaveAs {
-        url: AssetUrl,
-        dest: PathBuf,
-    },
-    BackupDir {},
-}
-
-#[derive(Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-enum SteamState {
-    Found { path: PathBuf, users: Vec<User> },
-    Missing { reason: String },
-}
-
-#[derive(Serialize)]
-struct InitReply {
-    api_key_set: bool,
-    steam: SteamState,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-enum AssetPage {
-    Known {
-        items: Vec<Asset>,
-        more: bool,
-        game_name: Option<String>,
-    },
-    Unknown {
-        game_name: Option<String>,
-    },
-}
-
-#[derive(Serialize)]
-struct PathReply {
-    path: PathBuf,
-}
-
-#[derive(Serialize)]
-struct ClearReply {
-    removed: usize,
-}
 
 fn reply<T: Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).map_err(|_| Error::Internal)
@@ -141,7 +63,7 @@ fn handle(request: Request) -> Result<String> {
             let mut cfg = store::load_config();
             cfg.api_key = key.as_str().to_string();
             store::save_config(&cfg)?;
-            sgdb::forget_pages();
+            cache::clear();
 
             reply(&())
         }

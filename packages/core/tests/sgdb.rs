@@ -2,17 +2,6 @@ use serde_json::json;
 
 use super::*;
 
-fn asset(url: &str) -> Asset {
-    Asset {
-        url: AssetUrl::try_from(url.to_string()).unwrap(),
-        preview: None,
-        width: 600,
-        height: 900,
-        style: None,
-        author: None,
-    }
-}
-
 #[test]
 fn assets_are_parsed_from_the_api_shape() {
     let parsed = Asset::parse(&json!({
@@ -67,24 +56,11 @@ fn only_a_full_page_promises_more() {
 }
 
 #[test]
-fn pages_are_cached_per_query() {
+fn each_query_has_its_own_cache_key() {
     let grid = page_key("/grids/steam/440", &[("types", "static"), ("page", "0")]);
     let next = page_key("/grids/steam/440", &[("types", "static"), ("page", "1")]);
     assert_eq!(grid, "/grids/steam/440?types=static&page=0");
     assert_ne!(grid, next);
-
-    let page = Page {
-        items: vec![asset("https://cdn2.steamgriddb.com/grid/a.png")],
-        more: false,
-    };
-
-    assert!(cached_page(&grid).is_none());
-    remember_page(grid.clone(), &page);
-    assert_eq!(cached_page(&grid), Some(page));
-    assert!(cached_page(&next).is_none());
-
-    forget_pages();
-    assert!(cached_page(&grid).is_none());
 }
 
 #[test]

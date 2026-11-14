@@ -11,7 +11,6 @@
     <ApplicationIcon>..\..\assets\app\main.ico</ApplicationIcon>
     <AssemblyName>SteamGridUI</AssemblyName>
     <RootNamespace>SteamGridUI</RootNamespace>
-    <!-- ThemeMode (the fluent theme) is still marked experimental -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <CoreDir>$(MSBuildProjectDirectory)\..\core</CoreDir>
   </PropertyGroup>

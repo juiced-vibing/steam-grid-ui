@@ -1,13 +1,9 @@
-use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::io::{self};
 use std::path::Path;
 use std::sync::LazyLock;
-use std::sync::Mutex;
-use std::sync::PoisonError;
 use std::time::Duration;
-use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -16,6 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 use ureq::Agent;
 
+use crate::cache;
 use crate::error::Error;
 use crate::error::Result;
 use crate::types::ApiKey;
@@ -32,9 +29,6 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
 
 const DEFAULT_LIMIT: usize = 50;
 
-const PAGE_TTL: Duration = Duration::from_secs(600);
-const PAGE_CACHE_MAX: usize = 128;
-
 static AGENT: LazyLock<Agent> = LazyLock::new(|| {
     Agent::config_builder()
         .timeout_global(Some(API_TIMEOUT))
@@ -42,8 +36,6 @@ static AGENT: LazyLock<Agent> = LazyLock::new(|| {
         .build()
         .into()
 });
-
-static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(Mutex::default);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Asset {
@@ -155,30 +147,6 @@ pub fn game_name(key: &ApiKey, app: AppId) -> Result<Option<String>> {
         .map(str::to_string))
 }
 
-fn cached_page(cache_key: &str) -> Option<Page> {
-    let pages = PAGES.lock().unwrap_or_else(PoisonError::into_inner);
-    pages
-        .get(cache_key)
-        .filter(|(at, _)| at.elapsed() < PAGE_TTL)
-        .map(|(_, page)| page.clone())
-}
-
-fn remember_page(cache_key: String, page: &Page) {
-    let mut pages = PAGES.lock().unwrap_or_else(PoisonError::into_inner);
-    if pages.len() >= PAGE_CACHE_MAX {
-        pages.retain(|_, (at, _)| at.elapsed() < PAGE_TTL);
-    }
-    if pages.len() >= PAGE_CACHE_MAX {
-        pages.clear();
-    }
-
-    pages.insert(cache_key, (Instant::now(), page.clone()));
-}
-
-pub fn forget_pages() {
-    PAGES.lock().unwrap_or_else(PoisonError::into_inner).clear();
-}
-
 const fn endpoint(kind: ArtKind) -> (&'static str, Option<&'static str>) {
     match kind {
         ArtKind::Grid => ("grids", Some("600x900,342x482,660x930")),
@@ -210,7 +178,7 @@ pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filte
 
     let path = format!("/{endpoint}/steam/{app}");
     let cache_key = page_key(&path, &query);
-    if let Some(page) = cached_page(&cache_key) {
+    if let Some(page) = cache::lookup(&cache_key) {
         return Ok(Some(page));
     }
 
@@ -219,7 +187,7 @@ pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filte
     };
 
     let page = Page::parse(&body);
-    remember_page(cache_key, &page);
+    cache::store(cache_key, &page);
 
     Ok(Some(page))
 }
