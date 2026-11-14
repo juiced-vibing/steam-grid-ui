@@ -17,7 +17,7 @@ steam-grid-ui is a Windows app that browses SteamGridDB artwork for the games in
 | `packages/core/src/store.rs` | `%APPDATA%\SteamGridUI`: config, name cache, thumbnails; API key lookup (`.env`)     |
 | `packages/core/src/vdf.rs`   | parser for Valve's text KeyValues files (`.vdf`, `.acf`)                             |
 | `packages/core/tests/`       | the unit tests of each module                                                        |
-| `packages/app/`              | WPF frontend, net8, plain code-behind (no MVVM)                                      |
+| `packages/app/`              | WPF frontend, net10, fluent theme, plain code-behind (no MVVM)                       |
 | `packages/app/Protocol.cs`   | the C# mirror of the core's requests, replies and error codes                        |
 | `packages/app/Native.cs`     | the P/Invoke side: `Native.Send(request)`                                            |
 | `.github/workflows/`         | `ci.yml` (push and PR to `main`), `release.yml` (on a `v*` tag)                      |
@@ -49,6 +49,7 @@ The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses un
 - Rust: edition 2024, the lint table in `packages/core/Cargo.toml` must pass with `-D warnings`. `unsafe` only at the C ABI, each use under `#[expect(unsafe_code, reason = "…")]`.
 - Unit tests live in `packages/core/tests/<module>.rs`, pulled into the module with `#[cfg(test)] #[path = "../tests/<module>.rs"] mod tests;`. `autotests = false` keeps cargo from building them as integration tests.
 - Tests are for edge cases and invariants (bad input, limits, what must not happen), not for restating the code. The C# side has none: keep logic in the core.
+- Comments: no docstrings on anything that is not public API, and few comments at all. A short `//` line only where the reason is not obvious from the code; lower case, no trailing period.
 - Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId` and `UserId` are numbers, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums with data (`Placed`, `AssetPage`, `SteamState`, `Preview`) rather than flags and nullable fields.
 - Errors: return `error::Result`, add context with `Error::io("doing what")`. The message is shown to the user as it is, so word it for a person. The frontend decides what to do from the code, never from the message, and handles every failure in `MainWindow.Report`.
 - Replaced or removed artwork is moved to the backup folder, never deleted; the newest three per slot are kept.
