@@ -1,6 +1,6 @@
-using System.IO;
 using System.Collections.ObjectModel;
-using System.Text.Json;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -13,177 +13,248 @@ namespace SteamGridUI;
 
 public partial class MainWindow : Window
 {
+    /// <summary>What the artwork list is showing: one kind of art for one game of one account</summary>
+    private sealed record Target(User User, GameItem Game, ArtKind Kind);
+
     private readonly ObservableCollection<AssetItem> _assets = [];
     private readonly SemaphoreSlim _thumbGate = new(6);
+
     private List<GameItem> _games = [];
-    private int _loadToken;
+
+    // bumped on every fresh listing, so replies to an older one are dropped
+    private int _generation;
     private int _page;
-    private bool _ready;
-    private bool _busy;
 
     public MainWindow()
     {
         InitializeComponent();
+
         AssetsList.ItemsSource = _assets;
+
+        // wired here, not in XAML: they would fire while the window is still being built
+        UserBox.SelectionChanged += (_, _) => Run(LoadGames);
+        GamesList.SelectionChanged += (_, _) => Run(() => LoadAssets(append: false));
+        KindBox.SelectionChanged += (_, _) => Run(() => LoadAssets(append: false));
+        AssetsList.SelectionChanged += (_, _) => UpdateButtons();
+        SearchBox.TextChanged += (_, _) => RefreshFilter();
     }
 
-    private string? UserId => (UserBox.SelectedItem as UserItem)?.Id;
-    private string Kind => (string)((ComboBoxItem)KindBox.SelectedItem).Tag;
-    private GameItem? Game => GamesList.SelectedItem as GameItem;
-    private AssetItem? Asset => AssetsList.SelectedItem as AssetItem;
+    private ArtKind Kind => (ArtKind)((ComboBoxItem)KindBox.SelectedItem).Tag;
 
-    private void SetStatus(string? text) => Status.Text = text ?? "";
+    private Target? Current =>
+        UserBox.SelectedItem is User user && GamesList.SelectedItem is GameItem game ? new Target(user, game, Kind) : null;
 
-    // ---- startup & library -------------------------------------------------------------
+    private AssetItem? Selected => AssetsList.SelectedItem as AssetItem;
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private void SetStatus(string text) => Status.Text = text;
+
+    /// <summary>Every failure ends up here, so each kind is handled once</summary>
+    private void Report(Exception error)
+    {
+        switch (error)
+        {
+            case BackendException { Code: ErrorCode.NoApiKey } e:
+                SetStatus(e.Message);
+                AskApiKey();
+                break;
+
+            case BackendException e:
+                SetStatus(e.Message);
+                break;
+
+            case DllNotFoundException:
+                SetStatus("sgdb_core.dll is missing; it belongs next to SteamGridUI.exe");
+                break;
+
+            default:
+                SetStatus($"Unexpected error: {error.Message}");
+                break;
+        }
+    }
+
+    /// <summary>Run UI work from an event handler, sending whatever it throws to Report</summary>
+    private async void Run(Func<Task> work)
     {
         try
         {
-            var init = await Native.Call("init");
-            var users = init.GetProperty("users").EnumerateArray()
-                .Select(u => new UserItem(u.GetProperty("id").GetString()!, u.GetProperty("name").GetString()!))
-                .ToList();
-            UserBox.ItemsSource = users;
-            _ready = true;
+            await work();
+        }
 
-            if (init.GetProperty("steam_path").ValueKind != JsonValueKind.String)
-                SetStatus(init.GetProperty("steam_error").GetString());
-            else if (users.Count == 0)
+        catch (Exception e)
+        {
+            Report(e);
+        }
+    }
+
+    /// <summary>Run with the action buttons disabled until the work is done</summary>
+    private void RunAction(Func<Task> work) => Run(async () =>
+    {
+        Actions.IsEnabled = false;
+
+        try
+        {
+            await work();
+        }
+
+        finally
+        {
+            Actions.IsEnabled = true;
+            UpdateButtons();
+        }
+    });
+
+    private void OnLoaded(object sender, RoutedEventArgs e) => Run(async () =>
+    {
+        var init = await Native.Send(new Init());
+
+        switch (init.Steam)
+        {
+            case SteamState.Missing missing:
+                SetStatus(missing.Reason);
+                break;
+
+            case SteamState.Found { Users.Count: 0 }:
                 SetStatus("No Steam accounts found. Sign in to Steam once, then restart this app.");
-            else
+                break;
+
+            case SteamState.Found found:
+                UserBox.ItemsSource = found.Users;
                 UserBox.SelectedIndex = 0; // most recently used account; loads its games
-
-            if (!init.GetProperty("api_key_set").GetBoolean()) AskApiKey();
+                break;
         }
-        catch (Exception ex)
-        {
-            SetStatus(ex.Message);
-        }
-    }
 
-    private async void OnUserChanged(object sender, SelectionChangedEventArgs e)
+        if (!init.ApiKeySet) AskApiKey();
+    });
+
+    private async Task LoadGames()
     {
-        if (!_ready || UserId is not { } user) return;
-        try
-        {
-            SetStatus("Reading Steam library…");
-            var list = await Native.Call("list_games", new { user });
-            if (user != UserId) return;
-            _games = list.EnumerateArray().Select(GameItem.Parse).ToList();
-            GamesList.ItemsSource = _games;
-            CollectionViewSource.GetDefaultView(_games).Filter = MatchesFilter;
-            SetStatus($"{_games.Count(g => g.Installed)} installed games, {_games.Count} known to this account.");
-        }
-        catch (Exception ex)
-        {
-            SetStatus(ex.Message);
-        }
+        if (UserBox.SelectedItem is not User user) return;
+
+        SetStatus("Reading Steam library…");
+        var games = await Native.Send(new ListGames(user.Id));
+        if (!ReferenceEquals(user, UserBox.SelectedItem)) return;
+
+        _games = games.Select(game => new GameItem(game)).ToList();
+        GamesList.ItemsSource = _games;
+        CollectionViewSource.GetDefaultView(_games).Filter = MatchesFilter;
+
+        SetStatus($"{_games.Count(g => g.Installed)} installed games, {_games.Count} known to this account.");
     }
 
     private bool MatchesFilter(object item)
     {
-        var g = (GameItem)item;
-        if (InstalledOnly.IsChecked == true && !g.Installed) return false;
-        var q = SearchBox.Text.Trim();
-        return q.Length == 0
-            || g.Display.Contains(q, StringComparison.OrdinalIgnoreCase)
-            || g.AppId.StartsWith(q, StringComparison.Ordinal);
+        var game = (GameItem)item;
+        if (InstalledOnly.IsChecked == true && !game.Installed) return false;
+
+        var query = SearchBox.Text.Trim();
+        return query.Length == 0
+            || game.Display.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || game.AppId.StartsWith(query, StringComparison.Ordinal);
     }
 
     private void RefreshFilter() => CollectionViewSource.GetDefaultView(_games).Refresh();
-    private void OnSearchChanged(object sender, TextChangedEventArgs e) { if (_ready) RefreshFilter(); }
+
     private void OnInstalledOnlyClick(object sender, RoutedEventArgs e) => RefreshFilter();
 
     private void OnApiKey(object sender, RoutedEventArgs e) => AskApiKey();
 
     private void AskApiKey()
     {
-        if (new ApiKeyWindow { Owner = this }.ShowDialog() == true)
-        {
-            SetStatus("API key saved.");
-            _ = LoadAssets(append: false);
-        }
+        if (new ApiKeyWindow { Owner = this }.ShowDialog() != true) return;
+
+        SetStatus("API key saved.");
+        Run(() => LoadAssets(append: false));
     }
 
-    // ---- artwork list ------------------------------------------------------------------
+    private void OnOptionClick(object sender, RoutedEventArgs e) => Run(() => LoadAssets(append: false));
 
-    private void OnGameChanged(object sender, SelectionChangedEventArgs e) { if (_ready) _ = LoadAssets(append: false); }
-    private void OnKindChanged(object sender, SelectionChangedEventArgs e) { if (_ready) _ = LoadAssets(append: false); }
-    private void OnOptionClick(object sender, RoutedEventArgs e) => _ = LoadAssets(append: false);
-    private void OnMore(object sender, RoutedEventArgs e) => _ = LoadAssets(append: true);
-    private void OnAssetChanged(object sender, SelectionChangedEventArgs e) => UpdateButtons();
+    private void OnMore(object sender, RoutedEventArgs e) => Run(() => LoadAssets(append: true));
 
     private async Task LoadAssets(bool append)
     {
         MoreBtn.IsEnabled = false;
+
         if (!append)
         {
-            _loadToken++;
+            _generation++;
             _page = 0;
             _assets.Clear();
         }
-        UpdateButtons();
-        if (Game is not { } game) return;
 
-        var token = _loadToken;
-        var kind = Kind;
+        UpdateButtons();
+        if (Current is not { } target) return;
+
+        var generation = _generation;
         var page = append ? _page + 1 : 0;
-        SetStatus($"Loading {game.Display}…");
+        SetStatus($"Loading {target.Game.Display}…");
+
+        AssetPage reply;
         try
         {
-            var r = await Native.Call("list_assets", new
-            {
-                appid = game.AppId,
-                kind,
+            reply = await Native.Send(new ListAssets(
+                target.Game.AppId,
+                target.Kind,
                 page,
-                animated = AnimatedBox.IsChecked == true,
-                humor = HumorBox.IsChecked == true,
-                nsfw = NsfwBox.IsChecked == true,
-                need_name = !game.HasName,
-            });
-            if (token != _loadToken) return;
-
-            if (r.GetProperty("game_name").GetString() is { Length: > 0 } name) game.Name = name;
-            _page = page;
-
-            var items = r.GetProperty("items").EnumerateArray().Select(e => AssetItem.Parse(e, kind)).ToList();
-            foreach (var item in items)
-            {
-                _assets.Add(item);
-                _ = LoadThumb(item, token);
-            }
-
-            // SteamGridDB's "total" counts assets the filters hide, so only a full page means there is more.
-            var limit = r.GetProperty("limit").ValueKind == JsonValueKind.Number ? r.GetProperty("limit").GetInt32() : 50;
-            MoreBtn.IsEnabled = items.Count >= limit;
-
-            SetStatus(
-                !r.GetProperty("known").GetBoolean() ? $"SteamGridDB has no entry for appid {game.AppId}."
-                : _assets.Count == 0 ? $"No matching artwork for {game.Display}. Try other filters."
-                : $"{game.Display}: {_assets.Count} results{(MoreBtn.IsEnabled ? ", more available" : "")}.");
+                Animated: AnimatedBox.IsChecked == true,
+                Nsfw: NsfwBox.IsChecked == true,
+                Humor: HumorBox.IsChecked == true,
+                NeedName: target.Game.Name is null));
         }
-        catch (Exception ex)
+
+        // the list has moved on: its failure is no longer news
+        catch (BackendException) when (generation != _generation)
         {
-            if (token == _loadToken) SetStatus(ex.Message);
+            return;
+        }
+
+        if (generation != _generation) return;
+
+        if (reply.GameName is { } name) target.Game.Name = name;
+
+        switch (reply)
+        {
+            case AssetPage.Unknown:
+                SetStatus($"SteamGridDB has no entry for appid {target.Game.AppId}.");
+                break;
+
+            case AssetPage.Known known:
+                _page = page;
+                MoreBtn.IsEnabled = known.More;
+
+                foreach (var asset in known.Items)
+                {
+                    var item = new AssetItem(asset, target.Kind);
+                    _assets.Add(item);
+                    _ = LoadThumb(item, generation);
+                }
+
+                SetStatus(_assets.Count == 0
+                    ? $"No matching artwork for {target.Game.Display}. Try other filters."
+                    : $"{target.Game.Display}: {_assets.Count} results{(known.More ? ", more available" : "")}.");
+                break;
         }
     }
 
-    private async Task LoadThumb(AssetItem item, int token)
+    private async Task LoadThumb(AssetItem item, int generation)
     {
-        if (item.NoPreview) return;
+        if (item.Asset.Preview is not { } url) return;
+
         await _thumbGate.WaitAsync();
+
         try
         {
-            if (token != _loadToken) return;
-            var r = await Native.Call("thumb", new { url = item.ThumbUrl });
-            var path = r.GetProperty("path").GetString()!;
-            item.Thumb = await Task.Run(() => Decode(path));
+            if (generation != _generation) return;
+
+            var thumb = await Native.Send(new Thumb(url));
+            item.Preview = new Preview.Ready(await Task.Run(() => Decode(thumb.Path)));
         }
-        catch
+
+        // one tile failing (a download, an image WPF cannot decode) must not disturb the list
+        catch (Exception e) when (e is BackendException or NotSupportedException or IOException)
         {
-            item.Placeholder = "preview unavailable";
+            item.Preview = new Preview.Unavailable("preview unavailable");
         }
+
         finally
         {
             _thumbGate.Release();
@@ -193,90 +264,82 @@ public partial class MainWindow : Window
     private static ImageSource Decode(string path)
     {
         var image = new BitmapImage();
+
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad; // read fully now; don't keep the file locked
         image.UriSource = new Uri(path);
         image.EndInit();
         image.Freeze();
+
         return image;
     }
 
-    // ---- actions -----------------------------------------------------------------------
-
     private void UpdateButtons()
     {
-        var slot = Kind != "icon";
-        ApplyBtn.IsEnabled = !_busy && slot && Asset is not null && UserId is not null;
-        SaveBtn.IsEnabled = !_busy && Asset is not null;
-        RevertBtn.IsEnabled = !_busy && slot && Game is { } g && g.Has(Kind);
-        ApplyBtn.ToolTip = slot ? null : "Steam has no custom icon slot for its own games. Use Save as… instead.";
-    }
+        var slot = Kind.Slot();
 
-    private async Task RunAction(Func<Task> action)
-    {
-        _busy = true;
-        UpdateButtons();
-        try
-        {
-            await action();
-        }
-        catch (Exception ex)
-        {
-            SetStatus(ex.Message);
-        }
-        finally
-        {
-            _busy = false;
-            UpdateButtons();
-        }
+        ApplyBtn.IsEnabled = slot is not null && Selected is not null && Current is not null;
+        ApplyBtn.ToolTip = slot is null ? "Steam has no custom icon slot for its own games. Use Save as… instead." : null;
+        SaveBtn.IsEnabled = Selected is not null && Current is not null;
+        RevertBtn.IsEnabled = slot is { } s && Current is { } target && target.Game.Has(s);
     }
 
     private void OnAssetDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (ApplyBtn.IsEnabled) OnApply(sender, e);
+        if (ApplyBtn.IsEnabled && Actions.IsEnabled) OnApply(sender, e);
     }
 
-    private async void OnApply(object sender, RoutedEventArgs e)
+    private void OnApply(object sender, RoutedEventArgs e)
     {
-        if (Game is not { } game || Asset is not { } asset || UserId is not { } user) return;
-        var kind = Kind;
-        await RunAction(async () =>
+        if (Current is not { } target || Selected is not { } item || target.Kind.Slot() is not { } slot) return;
+
+        RunAction(async () =>
         {
             SetStatus("Downloading…");
-            await Native.Call("apply", new { user, appid = game.AppId, kind, url = asset.Url });
-            game.SetHas(kind, true);
-            SetStatus($"Applied to {game.Display}. Restart Steam if the library doesn't pick it up.");
+            var placed = await Native.Send(new Apply(target.User.Id, target.Game.AppId, slot, item.Asset.Url));
+
+            target.Game.SetHas(slot, true);
+            SetStatus(placed switch
+            {
+                Placed.Unchanged => $"{target.Game.Display} already uses this image.",
+                Placed.Applied { Replaced: > 0 } => $"Applied to {target.Game.Display}; the previous image is in the backup folder. Restart Steam if the library doesn't pick it up.",
+                Placed.Applied => $"Applied to {target.Game.Display}. Restart Steam if the library doesn't pick it up.",
+                _ => throw new UnreachableException(),
+            });
         });
     }
 
-    private async void OnRevert(object sender, RoutedEventArgs e)
+    private void OnRevert(object sender, RoutedEventArgs e)
     {
-        if (Game is not { } game || UserId is not { } user) return;
-        var kind = Kind;
-        await RunAction(async () =>
+        if (Current is not { } target || target.Kind.Slot() is not { } slot) return;
+
+        RunAction(async () =>
         {
-            await Native.Call("clear", new { user, appid = game.AppId, kind });
-            game.SetHas(kind, false);
-            var dir = (await Native.Call("backup_dir")).GetProperty("path").GetString();
-            SetStatus($"Removed custom {Kinds.Label(kind)} art for {game.Display}. The old file is in {dir}.");
+            await Native.Send(new Clear(target.User.Id, target.Game.AppId, slot));
+            target.Game.SetHas(slot, false);
+
+            var backups = await Native.Send(new BackupDir());
+            SetStatus($"Removed custom {slot.Label()} art for {target.Game.Display}. The old file is in {backups.Path}.");
         });
     }
 
-    private async void OnSaveAs(object sender, RoutedEventArgs e)
+    private void OnSaveAs(object sender, RoutedEventArgs e)
     {
-        if (Game is not { } game || Asset is not { } asset) return;
-        var ext = Path.GetExtension(new Uri(asset.Url).AbsolutePath);
-        var safeName = string.Concat(game.Display.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        if (Current is not { } target || Selected is not { } item) return;
+
+        var safeName = string.Concat(target.Game.Display.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         var dialog = new SaveFileDialog
         {
-            FileName = $"{safeName} {Kinds.Label(Kind)}{ext}",
-            Filter = $"Image (*{ext})|*{ext}|All files|*.*",
+            FileName = $"{safeName} {target.Kind.Label()}{item.Extension}",
+            Filter = $"Image (*{item.Extension})|*{item.Extension}|All files|*.*",
         };
+
         if (dialog.ShowDialog(this) != true) return;
-        await RunAction(async () =>
+
+        RunAction(async () =>
         {
             SetStatus("Downloading…");
-            await Native.Call("save_as", new { url = asset.Url, dest = dialog.FileName });
+            await Native.Send(new SaveAs(item.Asset.Url, dialog.FileName));
             SetStatus($"Saved {dialog.FileName}");
         });
     }

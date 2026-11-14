@@ -13,7 +13,7 @@
     <CoreDir>$(MSBuildProjectDirectory)\..\core</CoreDir>
   </PropertyGroup>
 
-  <!-- `dotnet publish` gives one exe with the Rust core inside; it needs the .NET Desktop Runtime. -->
+  <!-- `dotnet publish` gives one exe with the Rust core inside -->
   <PropertyGroup>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
@@ -22,7 +22,7 @@
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
   </PropertyGroup>
 
-  <!-- The Rust backend is built as part of the C# build and copied next to the exe. -->
+  <!-- the rust backend is built as part of the C# build and copied next to the exe -->
   <Target Name="BuildRustCore" BeforeTargets="BeforeBuild">
     <Exec Command="cargo build --release" WorkingDirectory="$(CoreDir)" />
   </Target>

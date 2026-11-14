@@ -1,7 +1,6 @@
-using System.IO;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using System.Windows.Media;
 
 namespace SteamGridUI;
@@ -14,135 +13,108 @@ public abstract class Observable : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-public sealed record UserItem(string Id, string Name);
-
-public sealed class GameItem : Observable
+/// <summary>A game in the list; its name and custom slots change while the app runs</summary>
+public sealed class GameItem(Game game) : Observable
 {
-    private readonly HashSet<string> _custom = [];
-    private string _name = "";
+    private readonly HashSet<Slot> _custom = [.. game.Custom];
+    private string? _name = game.Name;
 
-    public required string AppId { get; init; }
-    public bool Installed { get; init; }
+    public string AppId { get; } = game.Appid;
+    public bool Installed { get; } = game.Installed;
 
-    public string Name
+    /// <summary>Null until Steam or SteamGridDB has named the game</summary>
+    public string? Name
     {
         get => _name;
         set
         {
             _name = value;
+
             Raise();
             Raise(nameof(Display));
         }
     }
 
-    public bool HasName => _name.Length > 0;
-    public string Display => HasName ? _name : $"App {AppId}";
+    public string Display => _name ?? $"App {AppId}";
 
     public string Sub
     {
         get
         {
             var parts = new List<string> { AppId };
+
             if (!Installed) parts.Add("not installed");
-            if (_custom.Count > 0) parts.Add("custom: " + string.Join(", ", Kinds.All.Where(_custom.Contains).Select(Kinds.Label)));
+            if (_custom.Count > 0) parts.Add("custom: " + string.Join(", ", Enum.GetValues<Slot>().Where(_custom.Contains).Select(s => s.Label())));
+
             return string.Join(" · ", parts);
         }
     }
 
-    public bool Has(string kind) => _custom.Contains(kind);
+    public bool Has(Slot slot) => _custom.Contains(slot);
 
-    public void SetHas(string kind, bool value)
+    public void SetHas(Slot slot, bool value)
     {
-        if (value ? _custom.Add(kind) : _custom.Remove(kind)) Raise(nameof(Sub));
-    }
-
-    public static GameItem Parse(JsonElement e)
-    {
-        var g = new GameItem
-        {
-            AppId = e.GetProperty("appid").GetString()!,
-            Installed = e.GetProperty("installed").GetBoolean(),
-            Name = e.GetProperty("name").GetString() ?? "",
-        };
-        foreach (var kind in Kinds.All)
-            if (e.GetProperty("has_" + kind).GetBoolean()) g._custom.Add(kind);
-        return g;
+        if (value ? _custom.Add(slot) : _custom.Remove(slot)) Raise(nameof(Sub));
     }
 }
 
+/// <summary>What a tile shows in place of, or as, its image</summary>
+public abstract record Preview
+{
+    public sealed record Loading : Preview;
+
+    public sealed record Ready(ImageSource Image) : Preview;
+
+    public sealed record Unavailable(string Reason) : Preview;
+}
+
+/// <summary>A piece of artwork in the list</summary>
 public sealed class AssetItem : Observable
 {
-    private ImageSource? _thumb;
-    private string _placeholder = "loading…";
+    private Preview _preview;
 
-    public required string Url { get; init; }
-    public string? ThumbUrl { get; init; }
-    public required string Info { get; init; }
-    public required string Author { get; init; }
-    public double TileW { get; init; }
-    public double TileH { get; init; }
-
-    /// <summary>Animated assets ship a .webm thumbnail, which an Image can't show.</summary>
-    public bool NoPreview => ThumbUrl is null || ThumbUrl.EndsWith(".webm", StringComparison.OrdinalIgnoreCase);
-
-    public ImageSource? Thumb
+    public AssetItem(Asset asset, ArtKind kind)
     {
-        get => _thumb;
-        set { _thumb = value; Raise(); }
+        Asset = asset;
+        (TileW, TileH) = kind.TileSize();
+
+        var info = new List<string> { $"{asset.Width}×{asset.Height}" };
+        if (asset.Style is { } style) info.Add(style.Replace('_', ' '));
+        if (Extension.Length > 1) info.Add(Extension[1..]);
+
+        Info = string.Join(" · ", info);
+        Author = asset.Author is { } author ? "by " + author : "";
+
+        _preview = asset.Preview is null ? new Preview.Unavailable("animated · no preview") : new Preview.Loading();
     }
 
-    public string Placeholder
+    public Asset Asset { get; }
+    public string Info { get; }
+    public string Author { get; }
+    public double TileW { get; }
+    public double TileH { get; }
+
+    /// <summary>File extension of the full image, with its dot</summary>
+    public string Extension => Path.GetExtension(new Uri(Asset.Url).AbsolutePath);
+
+    public Preview Preview
     {
-        get => _placeholder;
-        set { _placeholder = value; Raise(); }
-    }
-
-    public static AssetItem Parse(JsonElement e, string kind)
-    {
-        static string Str(JsonElement e, string name) =>
-            e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
-        static int Int(JsonElement e, string name) =>
-            e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
-
-        var author = e.TryGetProperty("author", out var a) && a.ValueKind == JsonValueKind.Object ? Str(a, "name") : "";
-        var info = new List<string> { $"{Int(e, "width")}×{Int(e, "height")}" };
-        if (Str(e, "style") is { Length: > 0 } style) info.Add(style.Replace('_', ' '));
-        var ext = Path.GetExtension(Str(e, "url")).TrimStart('.');
-        if (ext.Length > 0) info.Add(ext);
-
-        var (w, h) = Kinds.TileSize(kind);
-        var thumb = Str(e, "thumb");
-        var item = new AssetItem
+        get => _preview;
+        set
         {
-            Url = Str(e, "url"),
-            ThumbUrl = thumb.Length > 0 ? thumb : null,
-            Info = string.Join(" · ", info),
-            Author = author.Length > 0 ? "by " + author : "",
-            TileW = w,
-            TileH = h,
-        };
-        if (item.NoPreview) item.Placeholder = "animated · no preview";
-        return item;
+            _preview = value;
+
+            Raise(nameof(Thumb));
+            Raise(nameof(Placeholder));
+        }
     }
-}
 
-public static class Kinds
-{
-    /// <summary>Slots Steam reads from userdata/&lt;id&gt;/config/grid. Icons are download-only.</summary>
-    public static readonly string[] All = ["grid", "wide", "hero", "logo"];
+    public ImageSource? Thumb => _preview is Preview.Ready ready ? ready.Image : null;
 
-    public static string Label(string kind) => kind switch
+    public string Placeholder => _preview switch
     {
-        "grid" => "portrait",
-        _ => kind,
-    };
-
-    public static (double W, double H) TileSize(string kind) => kind switch
-    {
-        "grid" => (160, 240),
-        "wide" => (230, 108),
-        "hero" => (372, 120),
-        "logo" => (220, 130),
-        _ => (112, 112),
+        Preview.Loading => "loading…",
+        Preview.Unavailable unavailable => unavailable.Reason,
+        _ => "",
     };
 }

@@ -6,7 +6,7 @@ using System.Windows.Media;
 
 namespace SteamGridUI;
 
-/// <summary>Small dialog that collects and verifies the user's SteamGridDB API key.</summary>
+/// <summary>Small dialog that collects and verifies the user's SteamGridDB API key</summary>
 public sealed class ApiKeyWindow : Window
 {
     private const string KeyPage = "https://www.steamgriddb.com/profile/preferences/api";
@@ -26,6 +26,7 @@ public sealed class ApiKeyWindow : Window
 
         var link = new Hyperlink(new Run("your SteamGridDB preferences page"));
         link.Click += (_, _) => Process.Start(new ProcessStartInfo(KeyPage) { UseShellExecute = true });
+
         var intro = new TextBlock { TextWrapping = TextWrapping.Wrap };
         intro.Inlines.Add("Artwork is fetched through SteamGridDB's API with your own free key. Create one on ");
         intro.Inlines.Add(link);
@@ -35,6 +36,7 @@ public sealed class ApiKeyWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         buttons.Children.Add(_ok);
         buttons.Children.Add(cancel);
+
         _ok.Click += OnSave;
 
         var panel = new StackPanel { Margin = new Thickness(16) };
@@ -42,6 +44,7 @@ public sealed class ApiKeyWindow : Window
         panel.Children.Add(_key);
         panel.Children.Add(_error);
         panel.Children.Add(buttons);
+
         Content = panel;
         Loaded += (_, _) => _key.Focus();
     }
@@ -57,12 +60,15 @@ public sealed class ApiKeyWindow : Window
 
         _ok.IsEnabled = false;
         _error.Text = "";
+
         try
         {
-            await Native.Call("set_api_key", new { key });
+            await Native.Send(new SetApiKey(key));
             DialogResult = true;
         }
-        catch (Exception ex)
+
+        // rejected key, no network, rate limit: the message says which
+        catch (BackendException ex)
         {
             _error.Text = ex.Message;
             _ok.IsEnabled = true;
