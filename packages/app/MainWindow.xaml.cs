@@ -154,15 +154,14 @@ public partial class MainWindow : Window
                 _ = LoadThumb(item, token);
             }
 
+            // SteamGridDB's "total" counts assets the filters hide, so only a full page means there is more.
             var limit = r.GetProperty("limit").ValueKind == JsonValueKind.Number ? r.GetProperty("limit").GetInt32() : 50;
-            var total = r.GetProperty("total").ValueKind == JsonValueKind.Number ? r.GetProperty("total").GetInt32() : -1;
-            MoreBtn.IsEnabled = total >= 0 ? _assets.Count < total && items.Count > 0 : items.Count >= limit;
+            MoreBtn.IsEnabled = items.Count >= limit;
 
             SetStatus(
                 !r.GetProperty("known").GetBoolean() ? $"SteamGridDB has no entry for appid {game.AppId}."
                 : _assets.Count == 0 ? $"No matching artwork for {game.Display}. Try other filters."
-                : total >= 0 ? $"{game.Display}: showing {_assets.Count} of {total}."
-                : $"{game.Display}: {_assets.Count} results.");
+                : $"{game.Display}: {_assets.Count} results{(MoreBtn.IsEnabled ? ", more available" : "")}.");
         }
         catch (Exception ex)
         {
