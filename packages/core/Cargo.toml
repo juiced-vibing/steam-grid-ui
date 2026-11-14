@@ -1,0 +1,45 @@
+[package]
+name    = "sgdb_core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints.rust]
+future_incompatible       = { level = "warn", priority = -1 }
+nonstandard_style         = { level = "warn", priority = -1 }
+rust_2018_idioms          = { level = "warn", priority = -1 }
+trivial_numeric_casts     = "warn"
+unsafe_code               = "warn"
+unsafe_op_in_unsafe_fn    = "warn"
+unused_crate_dependencies = "warn"
+unused_import_braces      = "warn"
+unused_lifetimes          = "warn"
+unused_macro_rules        = "warn"
+unused_qualifications     = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+
+[lints.clippy]
+all                      = { level = "warn", priority = -2 }
+cast_possible_truncation = "allow"
+cast_possible_wrap       = "allow"
+cast_precision_loss      = "allow"
+cast_sign_loss           = "allow"
+missing_const_for_fn     = "warn"
+pedantic                 = { level = "warn", priority = -1 }
+wildcard_imports         = "allow"
+
+[dependencies]
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq       = { version = "2", features = ["json"] }
+winreg     = "0.52"
+
+[profile.release]
+opt-level = "s"
+lto       = true
+strip     = true
