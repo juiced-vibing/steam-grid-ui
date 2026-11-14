@@ -13,11 +13,6 @@ $Iscc = @("iscc", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:Pro
   Select-Object -First 1
 if (-not $Iscc) { throw "Inno Setup not found: winget install JRSoftware.InnoSetup" }
 
-if (-not (Test-Path (Join-Path $Dist "SteamGridUI.exe"))) {
-  dotnet publish (Join-Path $Root "packages\app\SteamGridUI.csproj") -c Release "-p:Version=$Version" -o $Dist
-  if ($LASTEXITCODE -ne 0) { exit 1 }
-}
-
 & $Iscc "/DAppVersion=$Version" "/DExeDir=$Dist" (Join-Path $Root "installer\SteamGridUI.iss")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 

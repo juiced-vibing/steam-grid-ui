@@ -40,7 +40,7 @@ dotnet run --project packages/app -c Release     # builds the Rust core first
 dotnet publish packages/app -c Release -o dist   # one exe with the core inside
 ```
 
-The installer needs [Inno Setup](https://jrsoftware.org/isinfo.php):
+The installer is built from the published exe in `dist/`, with [Inno Setup](https://jrsoftware.org/isinfo.php):
 
 ```pwsh
 winget install JRSoftware.InnoSetup
