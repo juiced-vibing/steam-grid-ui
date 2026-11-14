@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# unit tests are not counted in the language stats
+packages/core/tests/** linguist-detectable=false

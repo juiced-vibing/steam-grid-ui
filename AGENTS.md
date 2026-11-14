@@ -6,18 +6,25 @@ steam-grid-ui is a Windows app that browses SteamGridDB artwork for the games in
 
 ## Layout
 
-| path                         | contents                                                                          |
-| ---------------------------- | --------------------------------------------------------------------------------- |
-| `packages/core/`             | Rust `cdylib` (`sgdb_core.dll`): all logic and I/O                                |
-| `packages/core/src/lib.rs`   | the C ABI (`sgdb_call`, `sgdb_free`) and the method dispatch                      |
-| `packages/core/src/steam.rs` | Steam path, accounts, library, the `config/grid` art slots and their backups      |
-| `packages/core/src/sgdb.rs`  | SteamGridDB API v2 client and downloads (steamgriddb.com hosts only)              |
-| `packages/core/src/store.rs` | `%APPDATA%\SteamGridUI`: config, name cache, thumbnails; API key lookup (`.env`)  |
-| `packages/core/src/vdf.rs`   | parser for Valve's text KeyValues files (`.vdf`, `.acf`)                          |
-| `packages/app/`              | WPF frontend, net8, plain code-behind (no MVVM); `Native.cs` is the P/Invoke side |
-| `.github/workflows/`         | `ci.yml` (push and PR to `main`), `release.yml` (on a `v*` tag)                   |
+| path                         | contents                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------ |
+| `packages/core/`             | Rust `cdylib` (`sgdb_core.dll`): all logic and I/O                                   |
+| `packages/core/src/lib.rs`   | the C ABI (`sgdb_call`, `sgdb_free`), the `Request` enum and its handlers            |
+| `packages/core/src/types.rs` | values checked once where they enter: ids, `ApiKey`, `Slot`, `AssetUrl`              |
+| `packages/core/src/error.rs` | the one `Error` enum (thiserror); each variant has a user message and a stable code  |
+| `packages/core/src/steam.rs` | `Steam` (install, accounts, library) and `GridDir` (art slots and their backups)     |
+| `packages/core/src/sgdb.rs`  | SteamGridDB API v2 client, the page cache and downloads                              |
+| `packages/core/src/store.rs` | `%APPDATA%\SteamGridUI`: config, name cache, thumbnails; API key lookup (`.env`)     |
+| `packages/core/src/vdf.rs`   | parser for Valve's text KeyValues files (`.vdf`, `.acf`)                             |
+| `packages/core/tests/`       | the unit tests of each module                                                        |
+| `packages/app/`              | WPF frontend, net8, plain code-behind (no MVVM)                                      |
+| `packages/app/Protocol.cs`   | the C# mirror of the core's requests, replies and error codes                        |
+| `packages/app/Native.cs`     | the P/Invoke side: `Native.Send(request)`                                            |
+| `.github/workflows/`         | `ci.yml` (push and PR to `main`), `release.yml` (on a `v*` tag)                      |
 
-The frontend never touches Steam files or the network. It calls `Native.Call("method", args)`, which runs `sgdb_call` off the UI thread with JSON in and `{"ok":true,"data":…}` or `{"ok":false,"error":"…"}` out. A new feature is a new method in `dispatch` plus its caller in the window. Error strings are shown to the user as they are, so word them for a person.
+The frontend never touches Steam files or the network. It calls `Native.Send(new SomeRequest(…))`, which runs `sgdb_call` off the UI thread and returns the typed reply that request declares, or throws a `BackendException` with an `ErrorCode`. On the wire it is JSON: `{"ok":true,"data":…}` or `{"ok":false,"error":{"code":"…","message":"…"}}`.
+
+A new feature is a variant of `Request` in `lib.rs` with its arm in `handle`, and the matching record in `Protocol.cs`. A new failure is a variant of `Error` with its code, and the same name in `ErrorCode`.
 
 ## Commands
 
@@ -30,9 +37,9 @@ cargo clippy --manifest-path packages/core/Cargo.toml --all-targets -- -D warnin
 cargo test --manifest-path packages/core/Cargo.toml
 dotnet format packages/app/SteamGridUI.csproj
 
-prek install            # once
-prek run --all-files    # everything above, plus taplo, zizmor and shfmt
-scripts/pin-actions.sh  # pin workflow actions to commit hashes (needs pinact)
+prek install             # once
+prek run --all-files     # everything above, plus taplo, zizmor and shfmt
+scripts/pin-actions.sh   # pin workflow actions to commit hashes (needs pinact)
 ```
 
 The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses unstable options. Close the running app before rebuilding: it locks `sgdb_core.dll`.
@@ -40,8 +47,11 @@ The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses un
 ## Conventions
 
 - Rust: edition 2024, the lint table in `packages/core/Cargo.toml` must pass with `-D warnings`. `unsafe` only at the C ABI, each use under `#[expect(unsafe_code, reason = "…")]`.
-- Ids that reach a path or URL (`user`, `appid`) go through `id_arg`, which only accepts digits.
-- Replaced or removed artwork is moved to the backup folder, never deleted.
+- Unit tests live in `packages/core/tests/<module>.rs`, pulled into the module with `#[cfg(test)] #[path = "../tests/<module>.rs"] mod tests;`. `autotests = false` keeps cargo from building them as integration tests.
+- Tests are for edge cases and invariants (bad input, limits, what must not happen), not for restating the code. The C# side has none: keep logic in the core.
+- Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId` and `UserId` are numbers, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums with data (`Placed`, `AssetPage`, `SteamState`, `Preview`) rather than flags and nullable fields.
+- Errors: return `error::Result`, add context with `Error::io("doing what")`. The message is shown to the user as it is, so word it for a person. The frontend decides what to do from the code, never from the message, and handles every failure in `MainWindow.Report`.
+- Replaced or removed artwork is moved to the backup folder, never deleted; the newest three per slot are kept.
 - Workflow actions are pinned to a commit hash with the version in a comment. `permissions: {}` at the top, the least needed per job.
 - The API key lives in `.env` or the app's config. Never commit it, log it or put it in an error message.
 
