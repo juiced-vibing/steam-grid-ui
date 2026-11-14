@@ -199,3 +199,31 @@ fn clearing_keeps_the_newest_three_backups_of_a_slot() {
 
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn a_logo_gets_a_position_unless_steam_already_has_one() {
+    let root = scratch("logo_position");
+    let grid = grid_in(&root);
+    let position = root.join("grid/440.json");
+
+    // other slots need none
+    apply(&grid, Slot::Hero, ImageFormat::Png, b"hero");
+    assert!(!position.exists());
+
+    apply(&grid, Slot::Logo, ImageFormat::Png, b"logo");
+    assert_eq!(fs::read_to_string(&position).unwrap(), DEFAULT_LOGO_POSITION);
+    assert!(serde_json::from_str::<serde_json::Value>(DEFAULT_LOGO_POSITION).is_ok());
+
+    // a position set in steam survives a new logo
+    fs::write(&position, "set by the user in steam").unwrap();
+    apply(&grid, Slot::Logo, ImageFormat::Png, b"another logo");
+    assert_eq!(fs::read_to_string(&position).unwrap(), "set by the user in steam");
+
+    // a logo applied before positions were written gets one when it is applied again
+    fs::remove_file(&position).unwrap();
+    let again = apply(&grid, Slot::Logo, ImageFormat::Png, b"another logo");
+    assert!(matches!(again, Placed::Unchanged { .. }));
+    assert!(position.exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}

@@ -24,6 +24,10 @@ use crate::vdf;
 const BACKUPS_PER_SLOT: usize = 3;
 const HIDDEN_APPS: &[u32] = &[228_980];
 
+/// What Steam itself writes when a logo is first placed: bottom left, half the hero
+const DEFAULT_LOGO_POSITION: &str =
+    r#"{"nVersion":1,"logoPosition":{"pinnedPosition":"BottomLeft","nWidthPct":50,"nHeightPct":50}}"#;
+
 #[derive(Debug, Serialize)]
 pub struct User {
     pub id: UserId,
@@ -325,6 +329,10 @@ impl GridDir {
         let stem = slot.file_stem(app);
         let path = self.dir.join(format!("{stem}.{}", format.ext()));
 
+        if slot == Slot::Logo {
+            self.ensure_logo_position(app)?;
+        }
+
         if self.occupants(&stem) == [path.clone()] && same_content(staged.path(), &path) {
             return Ok(Placed::Unchanged { path });
         }
@@ -333,6 +341,19 @@ impl GridDir {
         fs::rename(staged.path(), &path).map_err(Error::io(format!("writing {}", path.display())))?;
 
         Ok(Placed::Applied { path, replaced })
+    }
+
+    /// Steam draws a custom logo only where `<appid>.json` says to
+    ///
+    /// Games with an official logo inherit its position; the others (sub-apps like a multiplayer mode) have none and
+    /// show nothing. A position the user set in Steam is left alone
+    fn ensure_logo_position(&self, app: AppId) -> Result<()> {
+        let path = self.dir.join(format!("{app}.json"));
+        if path.exists() {
+            return Ok(());
+        }
+
+        fs::write(&path, DEFAULT_LOGO_POSITION).map_err(Error::io(format!("writing {}", path.display())))
     }
 
     /// Move whatever is in a slot to the backup folder instead of deleting it
