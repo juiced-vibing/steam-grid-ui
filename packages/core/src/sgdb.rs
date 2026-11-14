@@ -1,205 +1,266 @@
-//! `SteamGridDB` API v2 client (<https://www.steamgriddb.com/api/v2>).
-
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::io::{self};
 use std::path::Path;
+use std::sync::LazyLock;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
+use ureq::Agent;
+
+use crate::error::Error;
+use crate::error::Result;
+use crate::types::ApiKey;
+use crate::types::AppId;
+use crate::types::ArtKind;
+use crate::types::AssetUrl;
 
 const BASE: &str = "https://www.steamgriddb.com/api/v2";
-const AGENT: &str = "SteamGridUI/0.1";
+const USER_AGENT: &str = "SteamGridUI/0.1";
 const MAX_DOWNLOAD: u64 = 256 * 1024 * 1024;
 
-pub enum ApiError {
-    NotFound,
-    Other(String),
+const API_TIMEOUT: Duration = Duration::from_secs(30);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
+
+const DEFAULT_LIMIT: usize = 50;
+
+const PAGE_TTL: Duration = Duration::from_secs(600);
+const PAGE_CACHE_MAX: usize = 128;
+
+static AGENT: LazyLock<Agent> = LazyLock::new(|| {
+    Agent::config_builder()
+        .timeout_global(Some(API_TIMEOUT))
+        .user_agent(USER_AGENT)
+        .build()
+        .into()
+});
+
+static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(Mutex::default);
+
+/// One piece of artwork, as the frontend gets it
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Asset {
+    pub url: AssetUrl,
+    /// Still image to show in the list; animated artwork has none
+    pub preview: Option<AssetUrl>,
+    pub width: u32,
+    pub height: u32,
+    pub style: Option<String>,
+    pub author: Option<String>,
 }
 
-impl From<ApiError> for String {
-    fn from(e: ApiError) -> String {
-        match e {
-            ApiError::NotFound => "Not found on SteamGridDB".into(),
-            ApiError::Other(s) => s,
-        }
+impl Asset {
+    fn parse(raw: &Value) -> Option<Self> {
+        let text = |key: &str| raw.get(key).and_then(Value::as_str).filter(|s| !s.is_empty());
+        let size = |key: &str| raw.get(key).and_then(Value::as_u64).unwrap_or(0) as u32;
+        let url = |key: &str| AssetUrl::try_from(text(key)?.to_string()).ok();
+
+        Some(Self {
+            url: url("url")?,
+            preview: url("thumb").filter(|thumb| thumb.format().is_some()),
+            width: size("width"),
+            height: size("height"),
+            style: text("style").map(str::to_string),
+            author: raw
+                .get("author")
+                .and_then(|author| author.get("name"))
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string),
+        })
     }
 }
 
-fn describe(err: ureq::Error) -> ApiError {
-    match err {
-        ureq::Error::Status(404, _) => ApiError::NotFound,
-        ureq::Error::Status(401 | 403, _) => {
-            ApiError::Other("SteamGridDB rejected the API key. Check it under \"API key…\".".into())
-        }
-        ureq::Error::Status(429, _) => {
-            ApiError::Other("SteamGridDB rate limit reached. Wait a moment and try again.".into())
-        }
-        ureq::Error::Status(code, _) => ApiError::Other(format!("SteamGridDB returned HTTP {code}")),
-        ureq::Error::Transport(t) => ApiError::Other(format!("Network error: {t}")),
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Page {
+    pub items: Vec<Asset>,
+    /// Whether asking for the next page can return anything
+    pub more: bool,
 }
 
-pub fn get(key: &str, path: &str, query: &[(&str, &str)]) -> Result<Value, ApiError> {
-    let mut req = ureq::get(&format!("{BASE}{path}"))
-        .set("Authorization", &format!("Bearer {key}"))
-        .set("User-Agent", AGENT)
-        .timeout(Duration::from_secs(30));
-    for (k, v) in query {
-        req = req.query(k, v);
-    }
-    let body: Value = req
-        .call()
-        .map_err(describe)?
-        .into_json()
-        .map_err(|e| ApiError::Other(format!("Unreadable SteamGridDB response: {e}")))?;
-    if body.get("success").and_then(Value::as_bool) == Some(false) {
-        let msg = body
-            .get("errors")
-            .and_then(|e| e.get(0))
-            .and_then(Value::as_str)
-            .unwrap_or("request failed");
-        return Err(ApiError::Other(format!("SteamGridDB: {msg}")));
-    }
-    Ok(body)
-}
-
-/// Name of the game `SteamGridDB` associates with a Steam appid.
-pub fn game_name(key: &str, appid: &str) -> Result<Option<String>, ApiError> {
-    match get(key, &format!("/games/steam/{appid}"), &[]) {
-        Ok(body) => Ok(body
+impl Page {
+    fn parse(body: &Value) -> Self {
+        let raw = body
             .get("data")
-            .and_then(|d| d.get("name"))
-            .and_then(Value::as_str)
-            .map(str::to_string)),
-        Err(ApiError::NotFound) => Ok(None),
-        Err(e) => Err(e),
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        let limit = body
+            .get("limit")
+            .and_then(Value::as_u64)
+            .map_or(DEFAULT_LIMIT, |limit| limit as usize);
+
+        // "total" counts what the filters hide, so only a full page means there is more
+        Self {
+            items: raw.iter().filter_map(Asset::parse).collect(),
+            more: raw.len() >= limit,
+        }
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
 pub struct Filters {
-    pub page: u32,
+    #[serde(default)]
     pub animated: bool,
+    #[serde(default)]
     pub nsfw: bool,
+    #[serde(default)]
     pub humor: bool,
 }
 
-/// One page of assets for a Steam appid. `kind` is grid | wide | hero | logo | icon.
-pub fn assets(key: &str, appid: &str, kind: &str, f: &Filters) -> Result<Value, ApiError> {
-    let (endpoint, dimensions) = match kind {
-        "grid" => ("grids", Some("600x900,342x482,660x930")),
-        "wide" => ("grids", Some("460x215,920x430")),
-        "hero" => ("heroes", None),
-        "logo" => ("logos", None),
-        "icon" => ("icons", None),
-        other => return Err(ApiError::Other(format!("unknown asset kind \"{other}\""))),
+fn get(key: &ApiKey, path: &str, query: &[(&str, &str)]) -> Result<Option<Value>> {
+    let mut request = AGENT
+        .get(format!("{BASE}{path}"))
+        .header("Authorization", format!("Bearer {}", key.as_str()));
+    for (k, v) in query {
+        request = request.query(k, v);
+    }
+
+    let mut response = match request.call() {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(404)) => return Ok(None),
+        Err(e) => return Err(e.into()),
     };
-    let page = f.page.to_string();
+
+    let body: Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|e| Error::Api(format!("unreadable response ({e})")))?;
+
+    if body.get("success").and_then(Value::as_bool) == Some(false) {
+        let message = body
+            .get("errors")
+            .and_then(|errors| errors.get(0))
+            .and_then(Value::as_str)
+            .unwrap_or("request failed");
+
+        return Err(Error::Api(message.to_string()));
+    }
+
+    Ok(Some(body))
+}
+
+/// Name of the game `SteamGridDB` associates with a Steam appid, if it knows the game
+pub fn game_name(key: &ApiKey, app: AppId) -> Result<Option<String>> {
+    let body = get(key, &format!("/games/steam/{app}"), &[])?;
+
+    Ok(body
+        .as_ref()
+        .and_then(|body| body.get("data"))
+        .and_then(|data| data.get("name"))
+        .and_then(Value::as_str)
+        .map(str::to_string))
+}
+
+fn cached_page(cache_key: &str) -> Option<Page> {
+    let pages = PAGES.lock().unwrap_or_else(PoisonError::into_inner);
+    pages
+        .get(cache_key)
+        .filter(|(at, _)| at.elapsed() < PAGE_TTL)
+        .map(|(_, page)| page.clone())
+}
+
+fn remember_page(cache_key: String, page: &Page) {
+    let mut pages = PAGES.lock().unwrap_or_else(PoisonError::into_inner);
+    if pages.len() >= PAGE_CACHE_MAX {
+        pages.retain(|_, (at, _)| at.elapsed() < PAGE_TTL);
+    }
+    if pages.len() >= PAGE_CACHE_MAX {
+        pages.clear();
+    }
+
+    pages.insert(cache_key, (Instant::now(), page.clone()));
+}
+
+/// Drop every cached page, for when the answers may differ (a new API key)
+pub fn forget_pages() {
+    PAGES.lock().unwrap_or_else(PoisonError::into_inner).clear();
+}
+
+const fn endpoint(kind: ArtKind) -> (&'static str, Option<&'static str>) {
+    match kind {
+        ArtKind::Grid => ("grids", Some("600x900,342x482,660x930")),
+        ArtKind::Wide => ("grids", Some("460x215,920x430")),
+        ArtKind::Hero => ("heroes", None),
+        ArtKind::Logo => ("logos", None),
+        ArtKind::Icon => ("icons", None),
+    }
+}
+
+fn page_key(path: &str, query: &[(&str, &str)]) -> String {
+    let pairs: Vec<String> = query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    format!("{path}?{}", pairs.join("&"))
+}
+
+/// One page of artwork for a Steam appid; `None` when `SteamGridDB` does not know the game
+pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filters) -> Result<Option<Page>> {
+    let (endpoint, dimensions) = endpoint(kind);
+
+    let page = page.to_string();
     let mut query = vec![
-        ("types", if f.animated { "static,animated" } else { "static" }),
-        ("nsfw", if f.nsfw { "any" } else { "false" }),
-        ("humor", if f.humor { "any" } else { "false" }),
+        ("types", if filters.animated { "static,animated" } else { "static" }),
+        ("nsfw", if filters.nsfw { "any" } else { "false" }),
+        ("humor", if filters.humor { "any" } else { "false" }),
         ("page", page.as_str()),
     ];
-    if let Some(d) = dimensions {
-        query.push(("dimensions", d));
+    if let Some(dimensions) = dimensions {
+        query.push(("dimensions", dimensions));
     }
-    get(key, &format!("/{endpoint}/steam/{appid}"), &query)
-}
 
-/// Only ever download from `SteamGridDB`'s own hosts.
-fn check_host(url: &str) -> Result<(), String> {
-    let host = url
-        .strip_prefix("https://")
-        .and_then(|rest| rest.split(['/', '?', '#']).next())
-        .unwrap_or("");
-    if host == "steamgriddb.com" || host.ends_with(".steamgriddb.com") {
-        Ok(())
-    } else {
-        Err("Refusing to download from a host that is not steamgriddb.com".into())
+    let path = format!("/{endpoint}/steam/{app}");
+    let cache_key = page_key(&path, &query);
+    if let Some(page) = cached_page(&cache_key) {
+        return Ok(Some(page));
     }
+
+    let Some(body) = get(key, &path, &query)? else {
+        return Ok(None);
+    };
+
+    let page = Page::parse(&body);
+    remember_page(cache_key, &page);
+
+    Ok(Some(page))
 }
 
-/// File extension of the asset behind a URL, lower-cased.
-pub fn url_ext(url: &str) -> String {
-    let file = url
-        .split(['?', '#'])
-        .next()
-        .unwrap_or("")
-        .rsplit('/')
-        .next()
-        .unwrap_or("");
-    match file.rsplit_once('.') {
-        Some((_, ext)) if ext.len() <= 5 && ext.bytes().all(|b| b.is_ascii_alphanumeric()) => ext.to_ascii_lowercase(),
-        _ => String::new(),
-    }
-}
-
-/// Last path segment, reduced to characters that are safe in a file name.
-pub fn url_file_name(url: &str) -> String {
-    url.split(['?', '#'])
-        .next()
-        .unwrap_or("")
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        .collect()
-}
-
-/// Download to a temp file next to `dest`, then move it into place.
-pub fn download(url: &str, dest: &Path) -> Result<(), String> {
-    check_host(url)?;
-    let resp = ureq::get(url)
-        .set("User-Agent", AGENT)
-        .timeout(Duration::from_secs(180))
-        .call()
-        .map_err(|e| String::from(describe(e)))?;
+/// Download to a temp file next to `dest`, then move it into place
+pub fn download(url: &AssetUrl, dest: &Path) -> Result<()> {
+    let response = AGENT
+        .get(url.as_str())
+        .config()
+        .timeout_global(Some(DOWNLOAD_TIMEOUT))
+        .build()
+        .call()?;
 
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
     let tmp = dest.with_extension(format!("part{nanos}"));
-    let result = (|| -> io::Result<()> {
+
+    let written = (|| -> io::Result<()> {
         let mut file = fs::File::create(&tmp)?;
-        let copied = io::copy(&mut resp.into_reader().take(MAX_DOWNLOAD), &mut file)?;
+        let copied = io::copy(&mut response.into_body().into_reader().take(MAX_DOWNLOAD), &mut file)?;
         if copied == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "empty download"));
         }
+
         drop(file);
         fs::rename(&tmp, dest)
     })();
-    if let Err(e) = result {
+
+    written.map_err(|e| {
         let _ = fs::remove_file(&tmp);
-        return Err(format!("Download failed: {e}"));
-    }
-    Ok(())
+        Error::io("Download failed")(e)
+    })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn host_allowlist() {
-        assert!(check_host("https://cdn2.steamgriddb.com/grid/abc.png").is_ok());
-        assert!(check_host("https://steamgriddb.com/x").is_ok());
-        assert!(check_host("https://evilsteamgriddb.com/x.png").is_err());
-        assert!(check_host("https://steamgriddb.com.evil.io/x.png").is_err());
-        assert!(check_host("http://cdn2.steamgriddb.com/x.png").is_err());
-        assert!(check_host("file:///c:/x.png").is_err());
-    }
-
-    #[test]
-    fn url_parts() {
-        assert_eq!(url_ext("https://cdn2.steamgriddb.com/grid/abc.PNG?x=1"), "png");
-        assert_eq!(url_ext("https://cdn2.steamgriddb.com/grid/abc"), "");
-        assert_eq!(
-            url_file_name("https://cdn2.steamgriddb.com/thumb/a..b/../c d.jpg"),
-            "cd.jpg"
-        );
-    }
-}
+#[path = "../tests/sgdb.rs"]
+mod tests;

@@ -1,14 +1,19 @@
-//! App-local state under %APPDATA%\SteamGridUI: config, name cache, thumbnails, backups.
-
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
 use serde::Serialize;
 
-/// Environment variable (or `.env` entry) that overrides the key saved from the UI.
+use crate::error::Error;
+use crate::error::Result;
+use crate::types::ApiKey;
+use crate::types::AppId;
+
 const KEY_VAR: &str = "SGDB_API_KEY";
 
 static NAMES_LOCK: Mutex<()> = Mutex::new(());
@@ -30,7 +35,7 @@ pub fn sub_dir(name: &str) -> PathBuf {
 pub struct Config {
     #[serde(default)]
     pub api_key: String,
-    /// Optional override when Steam isn't in the registry.
+    /// Optional override when Steam isn't in the registry
     #[serde(default)]
     pub steam_path: Option<String>,
 }
@@ -42,29 +47,67 @@ pub fn load_config() -> Config {
         .unwrap_or_default()
 }
 
-pub fn save_config(cfg: &Config) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(app_dir().join("config.json"), text).map_err(|e| e.to_string())
+pub fn save_config(cfg: &Config) -> Result<()> {
+    let text = serde_json::to_string_pretty(cfg).map_err(|_| Error::Internal)?;
+    fs::write(app_dir().join("config.json"), text).map_err(Error::io("saving the settings"))
 }
 
-/// appid -> game name, for owned games that aren't installed (no manifest to read).
-pub fn load_names() -> HashMap<String, String> {
+/// appid -> game name, for owned games that aren't installed (no manifest to read)
+pub fn load_names() -> HashMap<AppId, String> {
     fs::read_to_string(app_dir().join("names.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-pub fn remember_name(appid: &str, name: &str) {
+pub fn remember_name(app: AppId, name: &str) {
     let _guard = NAMES_LOCK.lock();
+
     let mut names = load_names();
-    if names.get(appid).map(String::as_str) == Some(name) {
+    if names.get(&app).map(String::as_str) == Some(name) {
         return;
     }
-    names.insert(appid.to_string(), name.to_string());
+
+    names.insert(app, name.to_string());
     if let Ok(text) = serde_json::to_string(&names) {
         let _ = fs::write(app_dir().join("names.json"), text);
     }
+}
+
+/// Delete the least recently written files in `dir` once it holds more than `max_bytes`
+pub fn prune_dir(dir: &Path, max_bytes: u64) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else { return 0 };
+
+    let mut files: Vec<(SystemTime, u64, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok().filter(fs::Metadata::is_file)?;
+            Some((meta.modified().unwrap_or(UNIX_EPOCH), meta.len(), entry.path()))
+        })
+        .collect();
+
+    let mut total: u64 = files.iter().map(|(_, len, _)| len).sum();
+    if total <= max_bytes {
+        return 0;
+    }
+
+    files.sort_unstable_by_key(|(modified, ..)| *modified);
+
+    let target = max_bytes / 4 * 3;
+    let mut removed = 0;
+
+    for (_, len, path) in files {
+        if total <= target {
+            break;
+        }
+
+        if fs::remove_file(&path).is_ok() {
+            total -= len;
+            removed += 1;
+        }
+    }
+
+    removed
 }
 
 fn parse_env(text: &str, name: &str) -> Option<String> {
@@ -80,7 +123,6 @@ fn parse_env(text: &str, name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Value of `name` in the nearest `.env`, walking up from the exe and from the working directory.
 fn dotenv(name: &str) -> Option<String> {
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from));
     [exe_dir, std::env::current_dir().ok()]
@@ -94,25 +136,16 @@ fn dotenv(name: &str) -> Option<String> {
         })
 }
 
-/// The API key to use: process environment, then `.env`, then the key saved from the UI.
-pub fn api_key() -> String {
+/// The API key to use: process environment, then `.env`, then the key saved from the UI
+pub fn api_key() -> Option<ApiKey> {
     std::env::var(KEY_VAR)
         .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
         .or_else(|| dotenv(KEY_VAR))
-        .unwrap_or_else(|| load_config().api_key)
+        .as_deref()
+        .and_then(ApiKey::new)
+        .or_else(|| ApiKey::new(&load_config().api_key))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_keys_from_env_text() {
-        let text = "# comment\nOTHER=1\nSGDB_API_KEY = \"abc123\"\n";
-        assert_eq!(parse_env(text, "SGDB_API_KEY").as_deref(), Some("abc123"));
-        assert_eq!(parse_env("SGDB_API_KEY=\n", "SGDB_API_KEY"), None);
-        assert_eq!(parse_env("#SGDB_API_KEY=x\n", "SGDB_API_KEY"), None);
-    }
-}
+#[path = "../tests/store.rs"]
+mod tests;

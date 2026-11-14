@@ -1,5 +1,3 @@
-//! Minimal parser for Valve's text `KeyValues` format (.vdf / .acf).
-
 #[derive(Debug, Clone)]
 pub enum Vdf {
     Str(String),
@@ -7,7 +5,7 @@ pub enum Vdf {
 }
 
 impl Vdf {
-    /// Case-insensitive child lookup (Steam is inconsistent about key casing).
+    /// Case-insensitive child lookup (Steam is inconsistent about key casing)
     pub fn get(&self, key: &str) -> Option<&Vdf> {
         match self {
             Vdf::Obj(v) => v.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v),
@@ -43,9 +41,11 @@ enum Tok {
 fn tokenize(text: &str) -> Vec<Tok> {
     let mut out = Vec::new();
     let mut it = text.chars().peekable();
+
     while let Some(c) = it.next() {
         match c {
             c if c.is_whitespace() => {}
+
             '{' => out.push(Tok::Open),
             '}' => out.push(Tok::Close),
             '/' if it.peek() == Some(&'/') => {
@@ -55,8 +55,10 @@ fn tokenize(text: &str) -> Vec<Tok> {
                     }
                 }
             }
+
             '"' => {
                 let mut s = String::new();
+
                 while let Some(c) = it.next() {
                     match c {
                         '"' => break,
@@ -66,32 +68,39 @@ fn tokenize(text: &str) -> Vec<Tok> {
                             Some(other) => s.push(other),
                             None => break,
                         },
+
                         _ => s.push(c),
                     }
                 }
+
                 out.push(Tok::Text(s));
             }
+
             _ => {
                 let mut s = String::from(c);
                 while let Some(&n) = it.peek() {
                     if n.is_whitespace() || n == '{' || n == '}' || n == '"' {
                         break;
                     }
+
                     s.push(n);
                     it.next();
                 }
-                // Platform conditionals like [$WIN32] carry no data we need.
+
+                // platform conditionals like [$WIN32] carry no data we need
                 if !s.starts_with('[') {
                     out.push(Tok::Text(s));
                 }
             }
         }
     }
+
     out
 }
 
 fn parse_obj(toks: &[Tok], pos: &mut usize, top: bool) -> Result<Vdf, String> {
     let mut items = Vec::new();
+
     loop {
         let key = match toks.get(*pos) {
             None if top => break,
@@ -103,6 +112,7 @@ fn parse_obj(toks: &[Tok], pos: &mut usize, top: bool) -> Result<Vdf, String> {
             Some(Tok::Text(k)) => k.clone(),
             Some(_) => return Err("unexpected brace where a key was expected".into()),
         };
+
         *pos += 1;
         let value = match toks.get(*pos) {
             Some(Tok::Text(v)) => {
@@ -115,8 +125,10 @@ fn parse_obj(toks: &[Tok], pos: &mut usize, top: bool) -> Result<Vdf, String> {
             }
             _ => return Err(format!("key \"{key}\" has no value")),
         };
+
         items.push((key, value));
     }
+
     Ok(Vdf::Obj(items))
 }
 
@@ -131,32 +143,5 @@ pub fn parse_file(path: &std::path::Path) -> Result<Vdf, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_nested_blocks_and_escapes() {
-        let v = parse(
-            r#"
-            // comment
-            "libraryfolders"
-            {
-                "0" { "path" "C:\\Program Files (x86)\\Steam" "apps" { "228980" "0" } }
-                "1" { "path" "G:\\SteamLibrary" }
-            }"#,
-        )
-        .unwrap();
-        let libs = v.get("LibraryFolders").unwrap();
-        assert_eq!(libs.entries().len(), 2);
-        assert_eq!(
-            libs.path(&["0", "path"]).unwrap().as_str(),
-            Some(r"C:\Program Files (x86)\Steam")
-        );
-        assert_eq!(libs.path(&["0", "apps", "228980"]).unwrap().as_str(), Some("0"));
-    }
-
-    #[test]
-    fn rejects_unterminated_block() {
-        assert!(parse(r#""a" { "b" "c""#).is_err());
-    }
-}
+#[path = "../tests/vdf.rs"]
+mod tests;

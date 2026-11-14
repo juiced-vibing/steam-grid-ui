@@ -1,228 +1,269 @@
-//! `sgdb_core`: backend for Steam Grid UI.
-//!
-//! The whole surface is two C functions. `sgdb_call(method, json_args)` blocks and
-//! returns a JSON string `{"ok":true,"data":…}` or `{"ok":false,"error":"…"}` that the
-//! caller must release with `sgdb_free`.
-
+mod error;
 mod sgdb;
 mod steam;
 mod store;
+mod types;
 mod vdf;
 
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ffi::c_char;
-use std::path::Path;
 use std::path::PathBuf;
 
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
 
-fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("missing argument \"{key}\""))
+use crate::error::Error;
+use crate::error::Result;
+use crate::sgdb::Asset;
+use crate::sgdb::Filters;
+use crate::steam::Steam;
+use crate::steam::User;
+use crate::types::ApiKey;
+use crate::types::AppId;
+use crate::types::ArtKind;
+use crate::types::AssetUrl;
+use crate::types::Slot;
+use crate::types::UserId;
+
+const THUMB_CACHE_MAX: u64 = 256 * 1024 * 1024;
+const KEY_CHECK_APP: u32 = 440;
+
+/// Everything the frontend can ask for; a request that parses is a request that is valid
+#[derive(Debug, Deserialize)]
+#[serde(tag = "method", content = "args", rename_all = "snake_case")]
+enum Request {
+    Init {},
+    SetApiKey {
+        key: String,
+    },
+    ListGames {
+        user: UserId,
+    },
+    ListAssets {
+        appid: AppId,
+        kind: ArtKind,
+        #[serde(default)]
+        page: u32,
+        #[serde(flatten)]
+        filters: Filters,
+        /// Also look up the game's name, for a game Steam could not name
+        #[serde(default)]
+        need_name: bool,
+    },
+    Thumb {
+        url: AssetUrl,
+    },
+    Apply {
+        user: UserId,
+        appid: AppId,
+        slot: Slot,
+        url: AssetUrl,
+    },
+    Clear {
+        user: UserId,
+        appid: AppId,
+        slot: Slot,
+    },
+    SaveAs {
+        url: AssetUrl,
+        dest: PathBuf,
+    },
+    BackupDir {},
 }
 
-fn flag(args: &Value, key: &str) -> bool {
-    args.get(key).and_then(Value::as_bool).unwrap_or(false)
+#[derive(Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum SteamState {
+    Found { path: PathBuf, users: Vec<User> },
+    Missing { reason: String },
 }
 
-/// Numeric ids only: these end up in file paths and URLs.
-fn id_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
-    let v = arg(args, key)?;
-    if steam::is_digits(v) {
-        Ok(v)
-    } else {
-        Err(format!("\"{key}\" must be numeric"))
-    }
+#[derive(Serialize)]
+struct InitReply {
+    api_key_set: bool,
+    steam: SteamState,
 }
 
-fn api_key() -> Result<String, String> {
-    let key = store::api_key();
-    if key.is_empty() {
-        Err("No SteamGridDB API key set. Add one under \"API key…\".".into())
-    } else {
-        Ok(key)
-    }
+#[derive(Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum AssetPage {
+    Known {
+        items: Vec<Asset>,
+        more: bool,
+        game_name: Option<String>,
+    },
+    /// `SteamGridDB` has no entry for the appid
+    Unknown { game_name: Option<String> },
 }
 
-fn steam_dir() -> Result<PathBuf, String> {
-    steam::steam_path(&store::load_config())
+#[derive(Serialize)]
+struct PathReply {
+    path: PathBuf,
 }
 
-fn show(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+#[derive(Serialize)]
+struct ClearReply {
+    removed: usize,
 }
 
-fn list_assets(args: &Value) -> Result<Value, String> {
-    let appid = id_arg(args, "appid")?;
-    let kind = arg(args, "kind")?;
-    let key = api_key()?;
-    let filters = sgdb::Filters {
-        page: args.get("page").and_then(Value::as_u64).unwrap_or(0) as u32,
-        animated: flag(args, "animated"),
-        nsfw: flag(args, "nsfw"),
-        humor: flag(args, "humor"),
-    };
-
-    let mut game_name = None;
-    if flag(args, "need_name") {
-        game_name = sgdb::game_name(&key, appid).map_err(String::from)?;
-        if let Some(name) = &game_name {
-            store::remember_name(appid, name);
-        }
-    }
-
-    match sgdb::assets(&key, appid, kind, &filters) {
-        Ok(body) => Ok(json!({
-            "items": body.get("data").cloned().unwrap_or_else(|| json!([])),
-            "total": body.get("total"),
-            "limit": body.get("limit"),
-            "game_name": game_name,
-            "known": true,
-        })),
-        Err(sgdb::ApiError::NotFound) => Ok(json!({
-            "items": [], "total": 0, "limit": null, "game_name": game_name, "known": false,
-        })),
-        Err(e) => Err(e.into()),
-    }
+fn reply<T: Serialize>(value: &T) -> Result<String> {
+    serde_json::to_string(value).map_err(|_| Error::Internal)
 }
 
-/// Download an asset into the user's grid folder, backing up whatever held the slot.
-fn apply(args: &Value) -> Result<Value, String> {
-    let user = id_arg(args, "user")?;
-    let appid = id_arg(args, "appid")?;
-    let url = arg(args, "url")?;
-    let base = steam::art_base(appid, arg(args, "kind")?)?;
-    let ext = sgdb::url_ext(url);
-    if !steam::ART_EXTS.contains(&ext.as_str()) {
-        return Err(format!("Steam cannot use \".{ext}\" files as library art"));
-    }
-
-    let grid = steam::grid_dir(&steam_dir()?, user);
-    std::fs::create_dir_all(&grid).map_err(|e| format!("{}: {e}", grid.display()))?;
-
-    // Fetch first so a failed download never costs the user their current art.
-    let staged = grid.join(format!("{base}.incoming"));
-    sgdb::download(url, &staged)?;
-    let dest = grid.join(format!("{base}.{ext}"));
-    let finish = steam::backup_slot(&grid, &base, &store::sub_dir("backup"), user).and_then(|n| {
-        std::fs::rename(&staged, &dest).map_err(|e| e.to_string())?;
-        Ok(n)
-    });
-    match finish {
-        Ok(replaced) => Ok(json!({ "path": show(&dest), "replaced": replaced })),
-        Err(e) => {
-            let _ = std::fs::remove_file(&staged);
-            Err(e)
-        }
-    }
-}
-
-fn dispatch(method: &str, args: &Value) -> Result<Value, String> {
-    match method {
-        "init" => {
+fn handle(request: Request) -> Result<String> {
+    match request {
+        Request::Init {} => {
             let cfg = store::load_config();
-            let steam = steam::steam_path(&cfg);
-            let users = steam.as_deref().map_or_default(steam::users);
-            Ok(json!({
-                "api_key_set": !store::api_key().is_empty(),
-                "steam_path": steam.as_deref().ok().map(show),
-                "steam_error": steam.as_ref().err(),
-                "users": users,
-            }))
+
+            // once per start, off the calling thread: keep the thumbnail cache bounded
+            std::thread::spawn(|| store::prune_dir(&store::sub_dir("thumbs"), THUMB_CACHE_MAX));
+
+            reply(&InitReply {
+                api_key_set: store::api_key().is_some(),
+                steam: match Steam::locate(&cfg) {
+                    Ok(steam) => SteamState::Found {
+                        path: steam.root().to_path_buf(),
+                        users: steam.users(),
+                    },
+                    Err(e) => SteamState::Missing { reason: e.to_string() },
+                },
+            })
         }
 
-        "set_api_key" => {
-            let key = arg(args, "key")?.trim().to_string();
-            if !key.is_empty() {
-                // Cheap authenticated request so a typo is caught now, not later.
-                // 440 is Team Fortress 2; a 404 would still prove the key works.
-                sgdb::game_name(&key, "440").map_err(String::from)?;
-            }
+        Request::SetApiKey { key } => {
+            let key = ApiKey::new(&key).ok_or(Error::NoApiKey)?;
+
+            // a cheap authenticated request, so a typo is caught now
+            sgdb::game_name(&key, KEY_CHECK_APP.into())?;
+
             let mut cfg = store::load_config();
-            cfg.api_key = key;
+            cfg.api_key = key.as_str().to_string();
             store::save_config(&cfg)?;
-            Ok(Value::Null)
+            sgdb::forget_pages();
+
+            reply(&())
         }
 
-        "list_games" => {
-            let user = id_arg(args, "user")?;
-            let games = steam::games(&steam_dir()?, user, &store::load_names());
-            Ok(json!(games))
+        Request::ListGames { user } => {
+            let steam = Steam::locate(&store::load_config())?;
+            reply(&steam.games(user, &store::load_names()))
         }
 
-        "list_assets" => list_assets(args),
+        Request::ListAssets {
+            appid,
+            kind,
+            page,
+            filters,
+            need_name,
+        } => {
+            let key = store::api_key().ok_or(Error::NoApiKey)?;
 
-        "thumb" => {
-            let url = arg(args, "url")?;
-            let name = sgdb::url_file_name(url);
-            if name.is_empty() || name.starts_with('.') {
-                return Err("thumbnail URL has no file name".into());
+            let game_name = if need_name { sgdb::game_name(&key, appid)? } else { None };
+            if let Some(name) = &game_name {
+                store::remember_name(appid, name);
             }
+
+            reply(&match sgdb::assets(&key, appid, kind, page, filters)? {
+                Some(page) => AssetPage::Known {
+                    items: page.items,
+                    more: page.more,
+                    game_name,
+                },
+                None => AssetPage::Unknown { game_name },
+            })
+        }
+
+        Request::Thumb { url } => {
+            let name = url
+                .file_name()
+                .ok_or_else(|| Error::BadRequest("the thumbnail URL has no file name".into()))?;
+
             let path = store::sub_dir("thumbs").join(name);
             if !path.is_file() {
-                sgdb::download(url, &path)?;
+                sgdb::download(&url, &path)?;
             }
-            Ok(json!({ "path": show(&path) }))
+
+            reply(&PathReply { path })
         }
 
-        "apply" => apply(args),
+        Request::Apply { user, appid, slot, url } => {
+            let format = url
+                .format()
+                .ok_or_else(|| Error::UnsupportedFormat(url.ext().unwrap_or_default().to_string()))?;
 
-        "clear" => {
-            let user = id_arg(args, "user")?;
-            let appid = id_arg(args, "appid")?;
-            let base = steam::art_base(appid, arg(args, "kind")?)?;
-            let grid = steam::grid_dir(&steam_dir()?, user);
-            let removed = steam::backup_slot(&grid, &base, &store::sub_dir("backup"), user)?;
-            Ok(json!({ "removed": removed }))
+            let steam = Steam::locate(&store::load_config())?;
+            let grid = steam.grid(user, &store::sub_dir("backup"));
+
+            // fetched before anything is touched, so a failed download costs nothing
+            let staged = grid.stage(appid, slot)?;
+            sgdb::download(&url, staged.path())?;
+
+            reply(&grid.place(staged, appid, slot, format)?)
         }
 
-        "save_as" => {
-            let dest = PathBuf::from(arg(args, "dest")?);
-            sgdb::download(arg(args, "url")?, &dest)?;
-            Ok(Value::Null)
+        Request::Clear { user, appid, slot } => {
+            let steam = Steam::locate(&store::load_config())?;
+            let removed = steam.grid(user, &store::sub_dir("backup")).clear(appid, slot)?;
+
+            reply(&ClearReply { removed })
         }
 
-        "backup_dir" => Ok(json!({ "path": show(&store::sub_dir("backup")) })),
+        Request::SaveAs { url, dest } => {
+            sgdb::download(&url, &dest)?;
+            reply(&())
+        }
 
-        other => Err(format!("unknown method \"{other}\"")),
+        Request::BackupDir {} => reply(&PathReply {
+            path: store::sub_dir("backup"),
+        }),
     }
 }
 
-#[expect(unsafe_code, reason = "reads the C strings handed over by the C# frontend")]
-fn run(method: *const c_char, args: *const c_char) -> Result<Value, String> {
-    if method.is_null() || args.is_null() {
-        return Err("null argument".into());
+fn respond(method: &str, args: &str) -> String {
+    let outcome = serde_json::from_str::<Value>(args)
+        .and_then(|args| serde_json::from_value::<Request>(json!({ "method": method, "args": args })))
+        .map_err(|e| Error::BadRequest(e.to_string()))
+        .and_then(|request| std::panic::catch_unwind(|| handle(request)).unwrap_or(Err(Error::Internal)));
+
+    match outcome {
+        // the reply is already JSON, written in field order so a tag always comes first
+        Ok(data) => format!(r#"{{"ok":true,"data":{data}}}"#),
+        Err(e) => json!({ "ok": false, "error": { "code": e.code(), "message": e.to_string() } }).to_string(),
     }
-    // SAFETY: the caller passes NUL-terminated buffers that outlive this call.
-    let (method, args) = unsafe { (CStr::from_ptr(method), CStr::from_ptr(args)) };
-    let method = method.to_str().map_err(|_| "method is not UTF-8")?;
-    let args: Value = serde_json::from_slice(args.to_bytes()).map_err(|e| format!("bad arguments: {e}"))?;
-    dispatch(method, &args)
 }
 
 /// # Safety
-/// `method` and `args` must be NUL-terminated UTF-8 strings.
+/// `method` and `args` must be NUL-terminated strings that stay valid for the call
 #[unsafe(no_mangle)]
 #[expect(unsafe_code, reason = "C ABI entry point for the C# frontend")]
 pub unsafe extern "C" fn sgdb_call(method: *const c_char, args: *const c_char) -> *mut c_char {
-    let result =
-        std::panic::catch_unwind(|| run(method, args)).unwrap_or_else(|_| Err("internal error in sgdb_core".into()));
-    let reply = match result {
-        Ok(data) => json!({ "ok": true, "data": data }),
-        Err(error) => json!({ "ok": false, "error": error }),
+    let text = |ptr: *const c_char| {
+        // SAFETY: the caller guarantees a NUL-terminated string for the duration of the call
+        (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) }.to_string_lossy())
     };
-    CString::new(reply.to_string()).unwrap_or_default().into_raw()
+
+    let response = match (text(method), text(args)) {
+        (Some(method), Some(args)) => respond(&method, &args),
+        _ => respond("", "null"),
+    };
+
+    CString::new(response).unwrap_or_default().into_raw()
 }
 
 /// # Safety
-/// `ptr` must come from `sgdb_call` and be freed exactly once.
+/// `ptr` must come from `sgdb_call` and be freed exactly once
 #[unsafe(no_mangle)]
 #[expect(unsafe_code, reason = "C ABI entry point for the C# frontend")]
 pub unsafe extern "C" fn sgdb_free(ptr: *mut c_char) {
     if !ptr.is_null() {
+        // SAFETY: the caller guarantees `ptr` came from `sgdb_call`
         drop(unsafe { CString::from_raw(ptr) });
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/lib.rs"]
+mod tests;

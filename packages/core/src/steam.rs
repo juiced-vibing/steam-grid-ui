@@ -1,5 +1,3 @@
-//! Local Steam discovery: install path, users, library, and the custom-art folder.
-
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -14,254 +12,386 @@ use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::enums::HKEY_LOCAL_MACHINE;
 
+use crate::error::Error;
+use crate::error::Result;
 use crate::store::Config;
+use crate::types::AppId;
+use crate::types::ImageFormat;
+use crate::types::Slot;
+use crate::types::UserId;
 use crate::vdf;
 
-/// Extensions Steam will pick up from userdata/<id>/config/grid.
-pub const ART_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
-
-/// Apps that are never games (Steamworks Common Redistributables).
+const BACKUPS_PER_SLOT: usize = 3;
 const HIDDEN_APPS: &[u32] = &[228_980];
 
-pub fn steam_path(cfg: &Config) -> Result<PathBuf, String> {
-    if let Some(p) = cfg.steam_path.as_deref().filter(|p| !p.is_empty()) {
-        return Ok(PathBuf::from(p));
-    }
-    let found = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey(r"Software\Valve\Steam")
-        .and_then(|k| k.get_value::<String, _>("SteamPath"))
-        .or_else(|_| {
-            RegKey::predef(HKEY_LOCAL_MACHINE)
-                .open_subkey(r"SOFTWARE\WOW6432Node\Valve\Steam")
-                .and_then(|k| k.get_value::<String, _>("InstallPath"))
-        })
-        .map_err(|_| "Steam installation not found in the registry".to_string())?;
-    let path = PathBuf::from(found.replace('/', "\\"));
-    if path.is_dir() {
-        Ok(path)
-    } else {
-        Err(format!("Steam path {} does not exist", path.display()))
-    }
-}
-
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct User {
-    pub id: String,
+    pub id: UserId,
     pub name: String,
 }
 
-pub fn users(steam: &Path) -> Vec<User> {
-    // accountid (userdata folder name) -> (persona, most recent)
-    let mut known: HashMap<String, (String, bool)> = HashMap::new();
-    if let Ok(v) = vdf::parse_file(&steam.join("config").join("loginusers.vdf"))
-        && let Some(list) = v.get("users")
-    {
-        for (steam64, info) in list.entries() {
-            let Ok(id64) = steam64.parse::<u64>() else { continue };
-            let account = (id64 & 0xFFFF_FFFF).to_string();
-            let persona = info
-                .get("PersonaName")
-                .or_else(|| info.get("AccountName"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let recent = info.get("MostRecent").and_then(|v| v.as_str()) == Some("1");
-            known.insert(account, (persona, recent));
-        }
-    }
-
-    let mut out: Vec<(bool, User)> = Vec::new();
-    if let Ok(dir) = fs::read_dir(steam.join("userdata")) {
-        for entry in dir.flatten() {
-            let id = entry.file_name().to_string_lossy().into_owned();
-            if id == "0" || !is_digits(&id) || !entry.path().is_dir() {
-                continue;
-            }
-            let (persona, recent) = known.get(&id).cloned().unwrap_or_default();
-            let name = if persona.is_empty() {
-                id.clone()
-            } else {
-                format!("{persona} ({id})")
-            };
-            out.push((recent, User { id, name }));
-        }
-    }
-    out.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
-    out.into_iter().map(|(_, u)| u).collect()
-}
-
-fn libraries(steam: &Path) -> Vec<PathBuf> {
-    let mut libs = vec![steam.to_path_buf()];
-    if let Ok(v) = vdf::parse_file(&steam.join("steamapps").join("libraryfolders.vdf"))
-        && let Some(folders) = v.get("libraryfolders")
-    {
-        for (_, folder) in folders.entries() {
-            if let Some(p) = folder.get("path").and_then(|p| p.as_str()) {
-                libs.push(PathBuf::from(p));
-            }
-        }
-    }
-    let mut seen = HashSet::new();
-    libs.retain(|p| seen.insert(p.to_string_lossy().to_lowercase()));
-    libs
-}
-
-#[derive(Serialize)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "mirrors the JSON the frontend reads, one flag per art slot"
-)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Game {
-    pub appid: String,
-    pub name: String,
+    pub appid: AppId,
+    /// Unknown for a game that is not installed, until `SteamGridDB` is asked about it
+    pub name: Option<String>,
     pub installed: bool,
-    pub has_grid: bool,
-    pub has_wide: bool,
-    pub has_hero: bool,
-    pub has_logo: bool,
+    /// Slots that hold custom artwork
+    pub custom: Vec<Slot>,
 }
 
-pub fn games(steam: &Path, user: &str, names: &HashMap<String, String>) -> Vec<Game> {
-    let mut found: BTreeMap<u32, (String, bool)> = BTreeMap::new();
+/// A Steam installation that exists on disk
+#[derive(Debug)]
+pub struct Steam {
+    root: PathBuf,
+}
 
-    // Installed games: one appmanifest per game in every library folder.
-    for lib in libraries(steam) {
-        let Ok(dir) = fs::read_dir(lib.join("steamapps")) else {
-            continue;
+impl Steam {
+    pub fn locate(cfg: &Config) -> Result<Self> {
+        if let Some(path) = cfg.steam_path.as_deref().filter(|p| !p.is_empty()) {
+            return Self::at(PathBuf::from(path));
+        }
+
+        let found = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Valve\Steam")
+            .and_then(|k| k.get_value::<String, _>("SteamPath"))
+            .or_else(|_| {
+                RegKey::predef(HKEY_LOCAL_MACHINE)
+                    .open_subkey(r"SOFTWARE\WOW6432Node\Valve\Steam")
+                    .and_then(|k| k.get_value::<String, _>("InstallPath"))
+            })
+            .map_err(|_| Error::SteamNotFound("it is not in the registry".into()))?;
+
+        Self::at(PathBuf::from(found.replace('/', "\\")))
+    }
+
+    fn at(root: PathBuf) -> Result<Self> {
+        if root.is_dir() {
+            Ok(Self { root })
+        } else {
+            Err(Error::SteamNotFound(format!("{} does not exist", root.display())))
+        }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Accounts that have signed in on this machine, the most recent first
+    pub fn users(&self) -> Vec<User> {
+        // account id (userdata folder name) -> (persona, most recent)
+        let mut known: HashMap<u32, (String, bool)> = HashMap::new();
+
+        if let Ok(v) = vdf::parse_file(&self.root.join("config").join("loginusers.vdf"))
+            && let Some(list) = v.get("users")
+        {
+            for (steam64, info) in list.entries() {
+                let Ok(id64) = steam64.parse::<u64>() else { continue };
+                let account = (id64 & 0xFFFF_FFFF) as u32;
+                let persona = info
+                    .get("PersonaName")
+                    .or_else(|| info.get("AccountName"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let recent = info.get("MostRecent").and_then(|v| v.as_str()) == Some("1");
+
+                known.insert(account, (persona, recent));
+            }
+        }
+
+        let mut out: Vec<(bool, User)> = Vec::new();
+        if let Ok(dir) = fs::read_dir(self.root.join("userdata")) {
+            for entry in dir.flatten() {
+                // "0" is Steam's placeholder for no account
+                let Some(id) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| name.parse::<u32>().ok())
+                    .filter(|&id| id != 0 && entry.path().is_dir())
+                else {
+                    continue;
+                };
+
+                let (persona, recent) = known.get(&id).cloned().unwrap_or_default();
+                let name = if persona.is_empty() {
+                    id.to_string()
+                } else {
+                    format!("{persona} ({id})")
+                };
+
+                out.push((recent, User { id: id.into(), name }));
+            }
+        }
+
+        out.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        out.into_iter().map(|(_, user)| user).collect()
+    }
+
+    fn libraries(&self) -> Vec<PathBuf> {
+        let mut libs = vec![self.root.clone()];
+
+        if let Ok(v) = vdf::parse_file(&self.root.join("steamapps").join("libraryfolders.vdf"))
+            && let Some(folders) = v.get("libraryfolders")
+        {
+            for (_, folder) in folders.entries() {
+                if let Some(path) = folder.get("path").and_then(|p| p.as_str()) {
+                    libs.push(PathBuf::from(path));
+                }
+            }
+        }
+
+        let mut seen = HashSet::new();
+
+        libs.retain(|path| seen.insert(path.to_string_lossy().to_lowercase()));
+        libs
+    }
+
+    /// Installed games by name, then everything else the account has touched
+    pub fn games(&self, user: UserId, names: &HashMap<AppId, String>) -> Vec<Game> {
+        // appid -> (name, installed)
+        let mut found: BTreeMap<u32, (Option<String>, bool)> = BTreeMap::new();
+
+        for lib in self.libraries() {
+            let Ok(dir) = fs::read_dir(lib.join("steamapps")) else {
+                continue;
+            };
+
+            for entry in dir.flatten() {
+                let path = entry.path();
+
+                let is_manifest = entry.file_name().to_string_lossy().starts_with("appmanifest_")
+                    && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("acf"));
+                if !is_manifest {
+                    continue;
+                }
+
+                let Ok(v) = vdf::parse_file(&path) else {
+                    continue;
+                };
+
+                let Some(state) = v.get("AppState") else { continue };
+                let Some(id) = state
+                    .get("appid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+
+                let name = state
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .filter(|name| !name.is_empty());
+                found.insert(id, (name.map(str::to_string), true));
+            }
+        }
+
+        let local = self
+            .root
+            .join("userdata")
+            .join(user.to_string())
+            .join("config")
+            .join("localconfig.vdf");
+        if let Ok(v) = vdf::parse_file(&local) {
+            let apps = v.path(&["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"]);
+            for (key, _) in apps.map_or(&[][..], vdf::Vdf::entries) {
+                if let Ok(id) = key.parse::<u32>() {
+                    found
+                        .entry(id)
+                        .or_insert_with(|| (names.get(&id.into()).cloned(), false));
+                }
+            }
+        }
+
+        let art = self.grid(user, Path::new("")).art_stems();
+
+        let mut out: Vec<Game> = found
+            .into_iter()
+            .filter(|(id, _)| !HIDDEN_APPS.contains(id))
+            .map(|(id, (name, installed))| {
+                let appid = AppId::from(id);
+                Game {
+                    appid,
+                    name,
+                    installed,
+                    custom: Slot::ALL
+                        .into_iter()
+                        .filter(|slot| art.contains(&slot.file_stem(appid)))
+                        .collect(),
+                }
+            })
+            .collect();
+
+        // named games first, by name; the rest by appid
+        out.sort_by_cached_key(|game| (game.name.as_deref().map(str::to_lowercase).ok_or(()), game.appid));
+        out
+    }
+
+    /// The folder Steam reads one account's custom artwork from
+    pub fn grid(&self, user: UserId, backup_root: &Path) -> GridDir {
+        let user = user.to_string();
+        GridDir {
+            dir: self.root.join("userdata").join(&user).join("config").join("grid"),
+            backups: backup_root.join(user),
+        }
+    }
+}
+
+/// A download waiting to be put in a slot; the file is removed if that never happens
+#[derive(Debug)]
+pub struct Staged {
+    path: PathBuf,
+}
+
+impl Staged {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        // already gone when it was moved into its slot
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// What putting an image in a slot did
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum Placed {
+    Applied {
+        path: PathBuf,
+        replaced: usize,
+    },
+    /// The slot already held this exact image
+    Unchanged {
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug)]
+pub struct GridDir {
+    dir: PathBuf,
+    backups: PathBuf,
+}
+
+impl GridDir {
+    /// Stems of every custom image, the form `Slot::file_stem` produces
+    fn art_stems(&self) -> HashSet<String> {
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return HashSet::new();
         };
-        for entry in dir.flatten() {
+
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| ImageFormat::of(path).is_some())
+            .filter_map(|path| Some(path.file_stem()?.to_str()?.to_lowercase()))
+            .collect()
+    }
+
+    /// Custom images currently in one slot, whatever their format
+    fn occupants(&self, stem: &str) -> Vec<PathBuf> {
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| ImageFormat::of(path).is_some())
+            .filter(|path| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.eq_ignore_ascii_case(stem))
+            })
+            .collect()
+    }
+
+    /// Where to download an image before it replaces anything
+    pub fn stage(&self, app: AppId, slot: Slot) -> Result<Staged> {
+        fs::create_dir_all(&self.dir).map_err(Error::io(format!("creating {}", self.dir.display())))?;
+
+        Ok(Staged {
+            path: self.dir.join(format!("{}.incoming", slot.file_stem(app))),
+        })
+    }
+
+    /// Put a staged download in its slot, backing up what was there
+    #[expect(clippy::needless_pass_by_value, reason = "placing uses up the staged download")]
+    pub fn place(&self, staged: Staged, app: AppId, slot: Slot, format: ImageFormat) -> Result<Placed> {
+        let stem = slot.file_stem(app);
+        let path = self.dir.join(format!("{stem}.{}", format.ext()));
+
+        if self.occupants(&stem) == [path.clone()] && same_content(staged.path(), &path) {
+            return Ok(Placed::Unchanged { path });
+        }
+
+        let replaced = self.clear(app, slot)?;
+        fs::rename(staged.path(), &path).map_err(Error::io(format!("writing {}", path.display())))?;
+
+        Ok(Placed::Applied { path, replaced })
+    }
+
+    /// Move whatever is in a slot to the backup folder instead of deleting it
+    pub fn clear(&self, app: AppId, slot: Slot) -> Result<usize> {
+        let stem = slot.file_stem(app);
+        let files = self.occupants(&stem);
+        if files.is_empty() {
+            return Ok(0);
+        }
+
+        fs::create_dir_all(&self.backups).map_err(Error::io(format!("creating {}", self.backups.display())))?;
+
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+
+        for file in &files {
+            let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("art");
+            let dest = self.backups.join(format!("{stamp}_{name}"));
+
+            // a plain move fails when the backup folder is on another drive
+            if fs::rename(file, &dest).is_err() {
+                fs::copy(file, &dest).map_err(Error::io(format!("backing up {name}")))?;
+                fs::remove_file(file).map_err(Error::io(format!("replacing {name}")))?;
+            }
+        }
+
+        prune_backups(&self.backups, &stem, BACKUPS_PER_SLOT);
+
+        Ok(files.len())
+    }
+}
+
+/// Keep only the newest `keep` backups of one slot; backups are named `<unix time>_<slot file>`
+fn prune_backups(dir: &Path, stem: &str, keep: usize) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else { return 0 };
+
+    let mut backups: Vec<(u64, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
             let path = entry.path();
-            let is_manifest = entry.file_name().to_string_lossy().starts_with("appmanifest_")
-                && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("acf"));
-            if !is_manifest {
-                continue;
-            }
-            let Ok(v) = vdf::parse_file(&path) else {
-                continue;
-            };
-            let Some(state) = v.get("AppState") else { continue };
-            let Some(id) = state
-                .get("appid")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<u32>().ok())
-            else {
-                continue;
-            };
-            let name = state.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            found.insert(id, (name.to_string(), true));
-        }
-    }
-
-    // Everything else the account has touched, from the user's local config.
-    let local = steam.join("userdata").join(user).join("config").join("localconfig.vdf");
-    if let Ok(v) = vdf::parse_file(&local) {
-        let apps = v.path(&["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"]);
-        for (key, _) in apps.map_or(&[][..], vdf::Vdf::entries) {
-            if let Ok(id) = key.parse::<u32>() {
-                found
-                    .entry(id)
-                    .or_insert_with(|| (names.get(key).cloned().unwrap_or_default(), false));
-            }
-        }
-    }
-
-    let art = existing_art(&grid_dir(steam, user));
-    let mut out: Vec<Game> = found
-        .into_iter()
-        .filter(|(id, _)| !HIDDEN_APPS.contains(id))
-        .map(|(id, (name, installed))| {
-            let has = |kind: &str| art.contains(&art_base(&id.to_string(), kind).unwrap_or_default());
-            Game {
-                appid: id.to_string(),
-                name,
-                installed,
-                has_grid: has("grid"),
-                has_wide: has("wide"),
-                has_hero: has("hero"),
-                has_logo: has("logo"),
-            }
+            let (stamp, slot) = path.file_stem()?.to_str()?.split_once('_')?;
+            let stamp = stamp.parse::<u64>().ok()?;
+            slot.eq_ignore_ascii_case(stem).then_some((stamp, path))
         })
         .collect();
-    out.sort_by_cached_key(|g| (g.name.is_empty(), g.name.to_lowercase(), g.appid.len(), g.appid.clone()));
-    out
+
+    backups.sort_unstable_by_key(|(stamp, _)| std::cmp::Reverse(*stamp));
+    backups
+        .into_iter()
+        .skip(keep)
+        .filter(|(_, path)| fs::remove_file(path).is_ok())
+        .count()
 }
 
-pub fn grid_dir(steam: &Path, user: &str) -> PathBuf {
-    steam.join("userdata").join(user).join("config").join("grid")
+/// Whether two files hold the same bytes
+fn same_content(a: &Path, b: &Path) -> bool {
+    let len = |path: &Path| fs::metadata(path).map(|m| m.len()).ok();
+    len(a).is_some() && len(a) == len(b) && fs::read(a).ok() == fs::read(b).ok()
 }
 
-/// File stem Steam expects for a given art slot.
-pub fn art_base(appid: &str, kind: &str) -> Result<String, String> {
-    Ok(match kind {
-        "grid" => format!("{appid}p"),
-        "wide" => appid.to_string(),
-        "hero" => format!("{appid}_hero"),
-        "logo" => format!("{appid}_logo"),
-        other => return Err(format!("\"{other}\" art cannot be applied to Steam")),
-    })
-}
-
-fn is_art(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| ART_EXTS.contains(&e.to_ascii_lowercase().as_str()))
-}
-
-/// Lower-cased stems of every custom image in the grid folder.
-fn existing_art(grid: &Path) -> HashSet<String> {
-    let mut set = HashSet::new();
-    if let Ok(dir) = fs::read_dir(grid) {
-        for entry in dir.flatten() {
-            let path = entry.path();
-            if is_art(&path)
-                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            {
-                set.insert(stem.to_lowercase());
-            }
-        }
-    }
-    set
-}
-
-/// Custom images currently occupying one slot (any extension).
-pub fn slot_files(grid: &Path, base: &str) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    if let Ok(dir) = fs::read_dir(grid) {
-        for entry in dir.flatten() {
-            let path = entry.path();
-            let stem_matches = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s.eq_ignore_ascii_case(base));
-            if stem_matches && is_art(&path) {
-                out.push(path);
-            }
-        }
-    }
-    out
-}
-
-/// Move whatever is in a slot into the backup folder instead of deleting it.
-pub fn backup_slot(grid: &Path, base: &str, backup_root: &Path, user: &str) -> Result<usize, String> {
-    let files = slot_files(grid, base);
-    if files.is_empty() {
-        return Ok(0);
-    }
-    let dir = backup_root.join(user);
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    for file in &files {
-        let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("art");
-        let dest = dir.join(format!("{stamp}_{name}"));
-        if fs::rename(file, &dest).is_err() {
-            // Different volume: copy then remove.
-            fs::copy(file, &dest).map_err(|e| format!("backup of {name} failed: {e}"))?;
-            fs::remove_file(file).map_err(|e| format!("could not replace {name}: {e}"))?;
-        }
-    }
-    Ok(files.len())
-}
-
-pub fn is_digits(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit())
-}
+#[cfg(test)]
+#[path = "../tests/steam.rs"]
+mod tests;
