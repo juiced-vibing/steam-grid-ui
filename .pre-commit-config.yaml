@@ -1,0 +1,59 @@
+fail_fast: true
+
+repos:
+  - repo: builtin
+    hooks:
+      - id: trailing-whitespace
+        priority: 0
+      - id: end-of-file-fixer
+        priority: 0
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        priority: 0
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        priority: 2
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path packages/core/Cargo.toml
+        language: system
+        types: [rust]
+        pass_filenames: false
+        priority: 0
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --manifest-path packages/core/Cargo.toml
+        language: system
+        types: [rust]
+        pass_filenames: false
+        priority: 0
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path packages/core/Cargo.toml --fix --allow-dirty --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        priority: 1
+
+      - id: taplo
+        name: taplo fmt
+        entry: uvx taplo fmt
+        language: system
+        types: [toml]
+        priority: 1
+
+      - id: dotnet-format
+        name: dotnet format
+        entry: dotnet format packages/app/SteamGridUI.csproj --no-restore
+        language: system
+        files: \.(cs|xaml|csproj)$
+        pass_filenames: false
+        priority: 1

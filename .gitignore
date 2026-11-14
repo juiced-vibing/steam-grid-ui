@@ -1,0 +1,17 @@
+### Rust ###
+debug/
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+rustc-ice-*.txt
+.cargo/
+
+### .NET ###
+bin/
+obj/
+*.user
+.vs/
+
+### LLMs ###
+.claude/
