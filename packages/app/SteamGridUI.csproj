@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>SteamGridUI</AssemblyName>
+    <RootNamespace>SteamGridUI</RootNamespace>
+    <CoreDir>$(MSBuildProjectDirectory)\..\core</CoreDir>
+  </PropertyGroup>
+
+  <!-- The Rust backend is built as part of the C# build and copied next to the exe. -->
+  <Target Name="BuildRustCore" BeforeTargets="BeforeBuild">
+    <Exec Command="cargo build --release" WorkingDirectory="$(CoreDir)" />
+  </Target>
+
+  <ItemGroup>
+    <None Include="$(CoreDir)\target\release\sgdb_core.dll" Link="sgdb_core.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
