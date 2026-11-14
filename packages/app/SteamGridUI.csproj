@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,6 +10,8 @@
     <Version>0.1.0</Version>
     <AssemblyName>SteamGridUI</AssemblyName>
     <RootNamespace>SteamGridUI</RootNamespace>
+    <!-- ThemeMode (the fluent theme) is still marked experimental -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <CoreDir>$(MSBuildProjectDirectory)\..\core</CoreDir>
   </PropertyGroup>
 

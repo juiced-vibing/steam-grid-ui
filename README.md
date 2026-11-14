@@ -7,7 +7,7 @@ The backend is a Rust DLL (`packages/core`) that reads the local Steam install a
 ## Requirements
 
 - Windows 10 or later, with Steam installed and signed in once
-- [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
 - A free [SteamGridDB API key](https://www.steamgriddb.com/profile/preferences/api)
 
 ## Get it running
@@ -16,7 +16,7 @@ Download `SteamGridUI.exe` from the [latest release](https://github.com/juiced-v
 
 ## Build from source
 
-Needs [Rust](https://rustup.rs/) (the nightly toolchain is picked up from `rust-toolchain.toml`) and the [.NET SDK](https://dotnet.microsoft.com/download) 8 or later.
+Needs [Rust](https://rustup.rs/) (the nightly toolchain is picked up from `rust-toolchain.toml`) and the [.NET SDK](https://dotnet.microsoft.com/download) 10 or later.
 
 ```pwsh
 dotnet run --project packages/app -c Release    # builds the Rust core first
