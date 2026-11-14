@@ -9,7 +9,7 @@
   #define AppVersion "0.0.0"
 #endif
 
-#define AppName "Steam Grid UI"
+#define AppName "SteamGridUI"
 #define AppPublisher "juiced-vibing"
 #define AppURL "https://github.com/juiced-vibing/steam-grid-ui"
 #define AppExeName "SteamGridUI.exe"

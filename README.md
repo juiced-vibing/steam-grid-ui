@@ -1,4 +1,4 @@
-# <img src="assets/app/main.png" alt="steam-grid-ui icon" height="28" width="28"> steam-grid-ui
+# <img src="assets/app/main.png" alt="steam-grid-ui icon" height="28" width="28"> SteamGridUI
 
 Windows app that browses [SteamGridDB](https://www.steamgriddb.com/) artwork for the games in your Steam library and applies it: portrait and wide grids, heroes and logos. Icons can be saved to disk.
 
