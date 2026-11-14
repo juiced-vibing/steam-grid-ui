@@ -48,11 +48,18 @@ jobs:
         shell: bash
         run: dotnet publish packages/app/SteamGridUI.csproj -c Release -p:Version="${VERSION#v}" -o dist
 
-      - name: Upload binary
+      # inno setup ships with the runner image
+      - name: Build installer
+        shell: pwsh
+        run: ./scripts/build-installer.ps1 -Version ($env:VERSION -replace '^v', '')
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: steam-grid-ui-windows
-          path: dist/SteamGridUI.exe
+          path: |
+            dist/SteamGridUI.exe
+            dist/SteamGridUI-*-setup.exe
           if-no-files-found: error
 
   release:
@@ -74,7 +81,7 @@ jobs:
           path: dist
 
       - name: Generate SHA256 checksums
-        run: bash .github/workflows/scripts/checksum.sh dist/SteamGridUI.exe
+        run: bash .github/workflows/scripts/checksum.sh dist/SteamGridUI.exe dist/SteamGridUI-*-setup.exe
 
       - name: Extract release notes
         run: bash .github/workflows/scripts/extract-changelog.sh "$VERSION" CHANGELOG.md > release_notes.md
@@ -83,4 +90,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$VERSION" --notes-file release_notes.md dist/SteamGridUI.exe dist/SteamGridUI.exe.sha256
+        run: gh release create "$VERSION" --notes-file release_notes.md dist/SteamGridUI-*-setup.exe dist/SteamGridUI-*-setup.exe.sha256 dist/SteamGridUI.exe dist/SteamGridUI.exe.sha256

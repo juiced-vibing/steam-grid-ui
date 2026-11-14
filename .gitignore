@@ -13,6 +13,10 @@ obj/
 *.user
 .vs/
 
+### Build artifacts ###
+dist/
+installer/output/
+
 ### LLMs ###
 .claude/
 
