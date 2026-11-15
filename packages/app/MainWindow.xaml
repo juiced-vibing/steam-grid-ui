@@ -22,8 +22,14 @@
                   ToolTip="Steam account" />
         <TextBox x:Name="SearchBox" DockPanel.Dock="Top" Margin="0,6,0,0" Padding="4"
                  ToolTip="Filter by name or appid" />
-        <CheckBox x:Name="InstalledOnly" DockPanel.Dock="Top" Margin="0,6,0,6" IsChecked="True"
-                  Content="Installed games only" Click="OnInstalledOnlyClick" />
+        <DockPanel DockPanel.Dock="Top" Margin="0,6,0,6">
+          <ComboBox x:Name="SortBox" DockPanel.Dock="Right" SelectedIndex="0" ToolTip="Order of the list">
+            <ComboBoxItem Content="By name" />
+            <ComboBoxItem Content="By ID" />
+          </ComboBox>
+          <CheckBox x:Name="InstalledOnly" VerticalAlignment="Center" IsChecked="True"
+                    Content="Installed games only" Click="OnInstalledOnlyClick" />
+        </DockPanel>
         <Button DockPanel.Dock="Bottom" Margin="0,6,0,0" Padding="8,4" Content="API key…" Click="OnApiKey" />
         <ListBox x:Name="GamesList"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">

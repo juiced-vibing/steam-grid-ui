@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
@@ -14,6 +15,8 @@ namespace SteamGridUI;
 public partial class MainWindow : Window
 {
     private sealed record Target(User User, GameItem Game, ArtKind Kind);
+
+    private static readonly IComparer ById = Comparer<GameItem>.Create((a, b) => a.Id.CompareTo(b.Id));
 
     private readonly ObservableCollection<AssetItem> _assets = [];
     private readonly SemaphoreSlim _thumbGate = new(6);
@@ -36,6 +39,7 @@ public partial class MainWindow : Window
         KindBox.SelectionChanged += (_, _) => Run(() => LoadAssets(append: false));
         AssetsList.SelectionChanged += (_, _) => UpdateButtons();
         SearchBox.TextChanged += (_, _) => RefreshFilter();
+        SortBox.SelectionChanged += (_, _) => ApplySort();
     }
 
     private ArtKind Kind => (ArtKind)((ComboBoxItem)KindBox.SelectedItem).Tag;
@@ -133,6 +137,7 @@ public partial class MainWindow : Window
         _games = games.Select(game => new GameItem(game)).ToList();
         GamesList.ItemsSource = _games;
         CollectionViewSource.GetDefaultView(_games).Filter = MatchesFilter;
+        ApplySort();
 
         SetStatus($"{_games.Count(g => g.Installed)} installed games, {_games.Count} known to this account.");
     }
@@ -147,6 +152,10 @@ public partial class MainWindow : Window
             || game.Display.Contains(query, StringComparison.OrdinalIgnoreCase)
             || game.AppId.StartsWith(query, StringComparison.Ordinal);
     }
+
+    // the core lists by name, so only the other order needs a comparer
+    private void ApplySort() =>
+        ((ListCollectionView)CollectionViewSource.GetDefaultView(_games)).CustomSort = SortBox.SelectedIndex == 1 ? ById : null;
 
     private void RefreshFilter() => CollectionViewSource.GetDefaultView(_games).Refresh();
 

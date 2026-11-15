@@ -19,6 +19,7 @@ public sealed class GameItem(Game game) : Observable
     private string? _name = game.Name;
 
     public string AppId { get; } = game.Appid;
+    public uint Id { get; } = uint.Parse(game.Appid);
     public bool Installed { get; } = game.Installed;
 
     public string? Name
