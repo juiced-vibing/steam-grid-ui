@@ -54,33 +54,24 @@ impl GridDir {
         Self { dir, backups }
     }
 
-    pub fn art_stems(&self) -> HashSet<String> {
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return HashSet::new();
-        };
-
-        entries
+    fn art(&self) -> impl Iterator<Item = (String, PathBuf)> {
+        fs::read_dir(&self.dir)
+            .into_iter()
+            .flatten()
             .flatten()
             .map(|entry| entry.path())
             .filter(|path| ImageFormat::of(path).is_some())
-            .filter_map(|path| Some(path.file_stem()?.to_str()?.to_lowercase()))
-            .collect()
+            .filter_map(|path| Some((path.file_stem()?.to_str()?.to_lowercase(), path)))
+    }
+
+    pub fn art_stems(&self) -> HashSet<String> {
+        self.art().map(|(stem, _)| stem).collect()
     }
 
     fn occupants(&self, stem: &str) -> Vec<PathBuf> {
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return Vec::new();
-        };
-
-        entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| ImageFormat::of(path).is_some())
-            .filter(|path| {
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|s| s.eq_ignore_ascii_case(stem))
-            })
+        self.art()
+            .filter(|(found, _)| found.eq_ignore_ascii_case(stem))
+            .map(|(_, path)| path)
             .collect()
     }
 

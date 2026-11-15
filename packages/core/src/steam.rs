@@ -90,12 +90,11 @@ impl Steam {
                 let Ok(id64) = steam64.parse::<u64>() else { continue };
                 let account = (id64 & 0xFFFF_FFFF) as u32;
                 let persona = info
-                    .get("PersonaName")
-                    .or_else(|| info.get("AccountName"))
-                    .and_then(|v| v.as_str())
+                    .text("PersonaName")
+                    .or_else(|| info.text("AccountName"))
                     .unwrap_or("")
                     .to_string();
-                let recent = info.get("MostRecent").and_then(|v| v.as_str()) == Some("1");
+                let recent = info.text("MostRecent") == Some("1");
 
                 known.insert(account, (persona, recent));
             }
@@ -136,7 +135,7 @@ impl Steam {
             && let Some(folders) = v.get("libraryfolders")
         {
             for (_, folder) in folders.entries() {
-                if let Some(path) = folder.get("path").and_then(|p| p.as_str()) {
+                if let Some(path) = folder.text("path") {
                     libs.push(PathBuf::from(path));
                 }
             }
