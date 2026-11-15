@@ -1,0 +1,21 @@
+<Window x:Class="SteamGridUI.ApiKeyWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SteamGridDB API key" Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        FocusManager.FocusedElement="{Binding ElementName=Key}">
+  <StackPanel Margin="{StaticResource WideGap}">
+    <TextBlock TextWrapping="Wrap">
+      Artwork is fetched through SteamGridDB's API with your own free key. Create one on
+      <Hyperlink NavigateUri="https://www.steamgriddb.com/profile/preferences/api" RequestNavigate="OnOpenLink">your SteamGridDB preferences page</Hyperlink>
+      and paste it here.
+    </TextBlock>
+    <TextBox x:Name="Key" Margin="{StaticResource GapTop}" />
+    <TextBlock x:Name="Error" Margin="{StaticResource GapTop}" TextWrapping="Wrap"
+               Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="{StaticResource GapTop}">
+      <Button x:Name="Ok" Content="Save" IsDefault="True" MinWidth="80" Click="OnSave" />
+      <Button Content="Cancel" IsCancel="True" MinWidth="80" Margin="{StaticResource GapLeft}" />
+    </StackPanel>
+  </StackPanel>
+</Window>

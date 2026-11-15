@@ -60,6 +60,7 @@ The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses un
 - Files: split a file when it holds two responsibilities, not at a line count; around 250 lines is the point to check.
 - Comments: no docstrings on anything that is not public API, and few comments at all. A short `//` line only where the reason is not obvious from the code; lower case, no trailing period.
 - Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId`, `UserId` and `GameId` are numbers, a `GameRef` is a Steam appid or a SteamGridDB game id, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums (`Placed`, `AssetPage`, `SteamState`, `Source`, `Preview`) rather than flags and nullable fields.
+- Frontend markup: margins are the `Gap*` resources in `App.xaml`, colours and text styles come from the Fluent theme. No literal margins, paddings, font sizes or colours, and no hand-made control where WPF or the theme has one.
 - Errors: return `error::Result`, add context with `Error::io("doing what")`. The message is shown to the user as it is, so word it for a person. The frontend decides what to do from the code, never from the message, and handles every failure in `MainWindow.Report`.
 - Replaced or removed artwork is moved to the backup folder, never deleted; the newest three per slot are kept.
 - Workflows and scripts: one command per line, no `\` continuations.

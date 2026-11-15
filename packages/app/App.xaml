@@ -3,4 +3,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml"
              ThemeMode="System"
-             DispatcherUnhandledException="OnUnhandled" />
+             DispatcherUnhandledException="OnUnhandled">
+  <Application.Resources>
+    <Thickness x:Key="Gap">8</Thickness>
+    <Thickness x:Key="GapTop">0,8,0,0</Thickness>
+    <Thickness x:Key="GapLeft">8,0,0,0</Thickness>
+    <Thickness x:Key="HalfGapTop">0,4,0,0</Thickness>
+    <Thickness x:Key="WideGap">16</Thickness>
+  </Application.Resources>
+</Application>

@@ -4,6 +4,13 @@
         xmlns:local="clr-namespace:SteamGridUI"
         Title="Steam Grid UI" Width="1320" Height="840" MinWidth="900" MinHeight="520"
         WindowStartupLocation="CenterScreen" Loaded="OnLoaded">
+  <Window.Resources>
+    <Style x:Key="Caption" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+  </Window.Resources>
+
   <DockPanel>
     <StatusBar DockPanel.Dock="Bottom">
       <TextBlock x:Name="Status" TextTrimming="CharacterEllipsis" />
@@ -16,13 +23,12 @@
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
 
-      <!-- library -->
-      <DockPanel Grid.Column="0" Margin="8">
+      <DockPanel Grid.Column="0" Margin="{StaticResource Gap}">
         <ComboBox x:Name="UserBox" DockPanel.Dock="Top" DisplayMemberPath="Name"
                   ToolTip="Steam account" />
-        <TextBox x:Name="SearchBox" DockPanel.Dock="Top" Margin="0,6,0,0" Padding="4"
+        <TextBox x:Name="SearchBox" DockPanel.Dock="Top" Margin="{StaticResource GapTop}"
                  ToolTip="Filter by name or appid" />
-        <DockPanel DockPanel.Dock="Top" Margin="0,6,0,0">
+        <DockPanel DockPanel.Dock="Top" Margin="{StaticResource GapTop}">
           <ComboBox x:Name="SortBox" DockPanel.Dock="Right" SelectedIndex="0" ToolTip="Order of the list">
             <ComboBoxItem Content="By name" />
             <ComboBoxItem Content="By ID" />
@@ -30,17 +36,17 @@
           <CheckBox x:Name="InstalledOnly" VerticalAlignment="Center" IsChecked="True"
                     Content="Installed games only" Click="OnInstalledOnlyClick" />
         </DockPanel>
-        <CheckBox x:Name="IdsFirst" DockPanel.Dock="Top" Margin="0,6,0,6" Content="Show IDs instead of names" />
-        <Button DockPanel.Dock="Bottom" Margin="0,6,0,0" Padding="8,4" Content="API key…" Click="OnApiKey" />
-        <ListBox x:Name="GamesList"
+        <CheckBox x:Name="IdsFirst" DockPanel.Dock="Top" Margin="{StaticResource GapTop}" Content="Show IDs instead of names" />
+        <Button DockPanel.Dock="Bottom" Margin="{StaticResource GapTop}" Content="API key…" Click="OnApiKey" />
+        <ListBox x:Name="GamesList" Margin="{StaticResource GapTop}"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <StackPanel Margin="2">
+              <StackPanel>
                 <TextBlock x:Name="First" Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
                 <DockPanel>
-                  <TextBlock x:Name="Second" Text="{Binding AppId}" FontSize="11" Foreground="Gray" TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Tags}" FontSize="11" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+                  <TextBlock x:Name="Second" Text="{Binding AppId}" Style="{StaticResource Caption}" />
+                  <TextBlock Text="{Binding Tags}" Style="{StaticResource Caption}" />
                 </DockPanel>
               </StackPanel>
               <DataTemplate.Triggers>
@@ -56,9 +62,15 @@
 
       <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" />
 
-      <!-- artwork -->
-      <DockPanel Grid.Column="2" Margin="4,8,8,8">
-        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+      <DockPanel Grid.Column="2" Margin="{StaticResource Gap}">
+        <WrapPanel DockPanel.Dock="Top">
+          <WrapPanel.Resources>
+            <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+              <Setter Property="Margin" Value="{StaticResource GapLeft}" />
+              <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+          </WrapPanel.Resources>
+
           <ComboBox x:Name="KindBox" Width="150" SelectedIndex="0">
             <ComboBoxItem Tag="{x:Static local:ArtKind.Grid}" Content="Portrait grid" />
             <ComboBoxItem Tag="{x:Static local:ArtKind.Wide}" Content="Wide grid" />
@@ -66,22 +78,22 @@
             <ComboBoxItem Tag="{x:Static local:ArtKind.Logo}" Content="Logo" />
             <ComboBoxItem Tag="{x:Static local:ArtKind.Icon}" Content="Icon" />
           </ComboBox>
-          <CheckBox x:Name="AnimatedBox" Margin="14,0,0,0" VerticalAlignment="Center" Content="Animated" Click="OnOptionClick" />
-          <CheckBox x:Name="HumorBox" Margin="14,0,0,0" VerticalAlignment="Center" Content="Humor" IsChecked="True" Click="OnOptionClick" />
-          <CheckBox x:Name="NsfwBox" Margin="14,0,0,0" VerticalAlignment="Center" Content="NSFW" Click="OnOptionClick" />
-          <ComboBox x:Name="MatchBox" Margin="14,0,0,0" MinWidth="200" DisplayMemberPath="Label" Visibility="Collapsed"
+          <CheckBox x:Name="AnimatedBox" Content="Animated" Click="OnOptionClick" />
+          <CheckBox x:Name="HumorBox" Content="Humor" IsChecked="True" Click="OnOptionClick" />
+          <CheckBox x:Name="NsfwBox" Content="NSFW" Click="OnOptionClick" />
+          <ComboBox x:Name="MatchBox" Margin="{StaticResource GapLeft}" MinWidth="200" DisplayMemberPath="Label" Visibility="Collapsed"
                     ToolTip="The SteamGridDB game this non-Steam game takes its artwork from" />
         </WrapPanel>
 
-        <DockPanel x:Name="Actions" DockPanel.Dock="Bottom" Margin="0,6,0,0" LastChildFill="False">
-          <Button x:Name="ApplyBtn" Padding="12,4" Content="Apply to Steam" IsEnabled="False" Click="OnApply" />
-          <Button x:Name="SaveBtn" Margin="6,0,0,0" Padding="12,4" Content="Save as…" IsEnabled="False" Click="OnSaveAs" />
-          <Button x:Name="RevertBtn" Margin="6,0,0,0" Padding="12,4" Content="Remove custom art" IsEnabled="False" Click="OnRevert"
+        <DockPanel x:Name="Actions" DockPanel.Dock="Bottom" Margin="{StaticResource GapTop}" LastChildFill="False">
+          <Button x:Name="ApplyBtn" Content="Apply to Steam" IsEnabled="False" Click="OnApply" />
+          <Button x:Name="SaveBtn" Margin="{StaticResource GapLeft}" Content="Save as…" IsEnabled="False" Click="OnSaveAs" />
+          <Button x:Name="RevertBtn" Margin="{StaticResource GapLeft}" Content="Remove custom art" IsEnabled="False" Click="OnRevert"
                   ToolTip="Go back to Steam's default for this slot. The current file is moved to the backup folder." />
-          <Button x:Name="MoreBtn" DockPanel.Dock="Right" Padding="12,4" Content="Load more" IsEnabled="False" Click="OnMore" />
+          <Button x:Name="MoreBtn" DockPanel.Dock="Right" Content="Load more" IsEnabled="False" Click="OnMore" />
         </DockPanel>
 
-        <ListBox x:Name="AssetsList" MouseDoubleClick="OnAssetDoubleClick"
+        <ListBox x:Name="AssetsList" Margin="{StaticResource GapTop}" MouseDoubleClick="OnAssetDoubleClick"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
           <ListBox.ItemsPanel>
             <ItemsPanelTemplate>
@@ -90,16 +102,17 @@
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <StackPanel Width="{Binding TileW}" Margin="4">
-                <Border Height="{Binding TileH}" Background="#22262D">
+              <StackPanel Width="{Binding TileW}">
+                <Border Height="{Binding TileH}" Background="{DynamicResource ControlFillColorSecondaryBrush}">
                   <Grid>
-                    <TextBlock Text="{Binding Placeholder}" Foreground="#8A93A3" FontSize="11"
+                    <TextBlock Text="{Binding Placeholder}" Style="{StaticResource Caption}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                     <Image Source="{Binding Thumb}" Stretch="Uniform" />
                   </Grid>
                 </Border>
-                <TextBlock Text="{Binding Info}" FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding Author}" FontSize="11" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Info}" Style="{StaticResource CaptionTextBlockStyle}" Margin="{StaticResource HalfGapTop}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Author}" Style="{StaticResource Caption}" />
               </StackPanel>
             </DataTemplate>
           </ListBox.ItemTemplate>
