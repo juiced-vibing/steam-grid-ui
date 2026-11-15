@@ -2,6 +2,13 @@
 
 All notable changes to steam-grid-ui.
 
+## [0.1.3] - 2026-11-15
+
+### Added
+
+- Non-Steam games: the shortcuts of the account are listed next to its Steam games, and take grids, heroes and logos the same way
+- A non-Steam game is matched to SteamGridDB by name; when the first match is the wrong game, pick another from the list above the artwork and it is remembered
+
 ## [0.1.2] - 2026-11-15
 
 ### Added
