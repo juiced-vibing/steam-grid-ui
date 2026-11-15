@@ -6,7 +6,7 @@ public enum ArtKind { Grid, Wide, Hero, Logo, Icon }
 
 public enum Slot { Grid, Wide, Hero, Logo }
 
-public enum Origin { Steam, Shortcut }
+public enum Source { Installed, Owned, Shortcut }
 
 public static class ArtKinds
 {
@@ -77,7 +77,7 @@ public abstract record SteamState
 
 public sealed record User(string Id, string Name);
 
-public sealed record Game(string Appid, string? Name, bool Installed, Origin Origin, List<Slot> Custom);
+public sealed record Game(string Appid, string? Name, Source Source, List<Slot> Custom);
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "by")]
 [JsonDerivedType(typeof(Steam), "steam")]

@@ -76,25 +76,25 @@ fn games_come_from_manifests_the_local_config_and_shortcuts() {
     let names = HashMap::from([(AppId::from(70), "Half-Life".to_string())]);
     let games = steam.games(UserId::from(7), &names);
 
-    let game = |id: u32, name: Option<&str>, installed: bool, custom: &[Slot]| Game {
+    let game = |id: u32, name: Option<&str>, source, custom: &[Slot]| Game {
         appid: id.into(),
         name: name.map(str::to_string),
-        installed,
-        origin: if id > 0x8000_0000 {
-            Origin::Shortcut
-        } else {
-            Origin::Steam
-        },
+        source,
         custom: custom.to_vec(),
     };
     assert_eq!(
         games,
         [
-            game(0x8000_0001, Some("Celeste"), true, &[Slot::Logo]),
-            game(10, Some("Counter-Strike"), true, &[]),
-            game(70, Some("Half-Life"), false, &[]),
-            game(440, Some("Team Fortress 2"), true, &[Slot::Grid, Slot::Hero]),
-            game(80, None, false, &[]),
+            game(0x8000_0001, Some("Celeste"), Source::Shortcut, &[Slot::Logo]),
+            game(10, Some("Counter-Strike"), Source::Installed, &[]),
+            game(70, Some("Half-Life"), Source::Owned, &[]),
+            game(
+                440,
+                Some("Team Fortress 2"),
+                Source::Installed,
+                &[Slot::Grid, Slot::Hero]
+            ),
+            game(80, None, Source::Owned, &[]),
         ]
     );
 

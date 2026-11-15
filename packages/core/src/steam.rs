@@ -29,8 +29,9 @@ pub struct User {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Origin {
-    Steam,
+pub enum Source {
+    Installed,
+    Owned,
     Shortcut,
 }
 
@@ -38,8 +39,7 @@ pub enum Origin {
 pub struct Game {
     pub appid: AppId,
     pub name: Option<String>,
-    pub installed: bool,
-    pub origin: Origin,
+    pub source: Source,
     pub custom: Vec<Slot>,
 }
 
@@ -171,12 +171,11 @@ impl Steam {
 
     pub fn games(&self, user: UserId, names: &HashMap<AppId, String>) -> Vec<Game> {
         let mut found: BTreeMap<u32, Game> = BTreeMap::new();
-        let mut add = |id: u32, name: Option<String>, installed, origin| {
+        let mut add = |id: u32, name: Option<String>, source| {
             found.entry(id).or_insert(Game {
                 appid: id.into(),
                 name,
-                installed,
-                origin,
+                source,
                 custom: Vec::new(),
             });
         };
@@ -204,7 +203,7 @@ impl Steam {
                     continue;
                 };
 
-                add(id, state.text("name").map(str::to_string), true, Origin::Steam);
+                add(id, state.text("name").map(str::to_string), Source::Installed);
             }
         }
 
@@ -212,13 +211,13 @@ impl Steam {
             let apps = v.path(&["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"]);
             for (key, _) in apps.map_or(&[][..], vdf::Vdf::entries) {
                 if let Ok(id) = key.parse::<u32>() {
-                    add(id, names.get(&id.into()).cloned(), false, Origin::Steam);
+                    add(id, names.get(&id.into()).cloned(), Source::Owned);
                 }
             }
         }
 
         for (id, name) in self.shortcuts(user) {
-            add(id, Some(name), true, Origin::Shortcut);
+            add(id, Some(name), Source::Shortcut);
         }
 
         let art = self.grid(user, Path::new("")).art_stems();

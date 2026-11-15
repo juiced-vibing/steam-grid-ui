@@ -140,13 +140,13 @@ public partial class MainWindow : Window
         CollectionViewSource.GetDefaultView(_games).Filter = MatchesFilter;
         ApplySort();
 
-        SetStatus($"{_games.Count(g => g.Installed)} installed games, {_games.Count} known to this account.");
+        SetStatus($"{_games.Count(g => g.Source != Source.Owned)} installed games, {_games.Count} known to this account.");
     }
 
     private bool MatchesFilter(object item)
     {
         var game = (GameItem)item;
-        if (InstalledOnly.IsChecked == true && !game.Installed) return false;
+        if (InstalledOnly.IsChecked == true && game.Source == Source.Owned) return false;
 
         var query = SearchBox.Text.Trim();
         return query.Length == 0
@@ -195,7 +195,7 @@ public partial class MainWindow : Window
     // a steam game is known by its appid; a shortcut only has a name to search for
     private static async Task<GameRef?> Resolve(GameItem game)
     {
-        if (game.Origin == Origin.Steam) return new GameRef.Steam(game.AppId);
+        if (game.Source != Source.Shortcut) return new GameRef.Steam(game.AppId);
 
         game.Matches ??= await Native.Send(new FindGame(game.AppId, game.Display));
         game.Match ??= game.Matches.FirstOrDefault();
