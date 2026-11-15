@@ -2,7 +2,7 @@
 
 Windows app that browses [SteamGridDB](https://www.steamgriddb.com/) artwork for the games in your Steam library, non-Steam shortcuts included, and applies it: portrait and wide grids, heroes and logos. Icons can be saved to disk.
 
-![The main window: the Steam library on the left, SteamGridDB artwork for the selected game on the right](assets/screenshot.jpg)
+![Screenshot](assets/screenshot.jpg)
 
 The backend is a Rust DLL (`packages/core`) that reads the local Steam install and talks to the SteamGridDB API. The frontend is a WPF window (`packages/app`) that calls it over P/Invoke.
 
