@@ -36,16 +36,16 @@ public sealed class GameItem(Game game) : Observable
 
     public string Display => _name ?? $"App {AppId}";
 
-    public string Sub
+    public string Tags
     {
         get
         {
-            var parts = new List<string> { AppId };
+            var parts = new List<string>();
 
             if (!Installed) parts.Add("not installed");
             if (_custom.Count > 0) parts.Add("custom: " + string.Join(", ", Enum.GetValues<Slot>().Where(_custom.Contains).Select(s => s.Label())));
 
-            return string.Join(" · ", parts);
+            return string.Concat(parts.Select(part => " · " + part));
         }
     }
 
@@ -53,7 +53,7 @@ public sealed class GameItem(Game game) : Observable
 
     public void SetHas(Slot slot, bool value)
     {
-        if (value ? _custom.Add(slot) : _custom.Remove(slot)) Raise(nameof(Sub));
+        if (value ? _custom.Add(slot) : _custom.Remove(slot)) Raise(nameof(Tags));
     }
 }
 

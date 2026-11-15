@@ -22,7 +22,7 @@
                   ToolTip="Steam account" />
         <TextBox x:Name="SearchBox" DockPanel.Dock="Top" Margin="0,6,0,0" Padding="4"
                  ToolTip="Filter by name or appid" />
-        <DockPanel DockPanel.Dock="Top" Margin="0,6,0,6">
+        <DockPanel DockPanel.Dock="Top" Margin="0,6,0,0">
           <ComboBox x:Name="SortBox" DockPanel.Dock="Right" SelectedIndex="0" ToolTip="Order of the list">
             <ComboBoxItem Content="By name" />
             <ComboBoxItem Content="By ID" />
@@ -30,15 +30,25 @@
           <CheckBox x:Name="InstalledOnly" VerticalAlignment="Center" IsChecked="True"
                     Content="Installed games only" Click="OnInstalledOnlyClick" />
         </DockPanel>
+        <CheckBox x:Name="IdsFirst" DockPanel.Dock="Top" Margin="0,6,0,6" Content="Show IDs instead of names" />
         <Button DockPanel.Dock="Bottom" Margin="0,6,0,0" Padding="8,4" Content="API key…" Click="OnApiKey" />
         <ListBox x:Name="GamesList"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
           <ListBox.ItemTemplate>
             <DataTemplate>
               <StackPanel Margin="2">
-                <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="First" Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+                <DockPanel>
+                  <TextBlock x:Name="Second" Text="{Binding AppId}" FontSize="11" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Tags}" FontSize="11" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
               </StackPanel>
+              <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsChecked, ElementName=IdsFirst}" Value="True">
+                  <Setter TargetName="First" Property="Text" Value="{Binding AppId}" />
+                  <Setter TargetName="Second" Property="Text" Value="{Binding Display}" />
+                </DataTrigger>
+              </DataTemplate.Triggers>
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
