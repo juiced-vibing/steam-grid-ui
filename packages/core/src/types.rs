@@ -23,6 +23,12 @@ macro_rules! numeric_id {
             }
         }
 
+        impl $name {
+            pub const fn new(id: u32) -> Self {
+                Self(id)
+            }
+        }
+
         impl From<u32> for $name {
             fn from(id: u32) -> Self {
                 Self(id)
@@ -46,6 +52,24 @@ macro_rules! numeric_id {
 numeric_id!(AppId, "appid");
 
 numeric_id!(UserId, "user");
+
+numeric_id!(GameId, "game id");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "by", rename_all = "snake_case")]
+pub enum GameRef {
+    Steam { appid: AppId },
+    Sgdb { id: GameId },
+}
+
+impl GameRef {
+    pub fn api_path(self) -> String {
+        match self {
+            Self::Steam { appid } => format!("steam/{appid}"),
+            Self::Sgdb { id } => format!("game/{id}"),
+        }
+    }
+}
 
 // not Debug, so it cannot end up in a log
 #[derive(Clone)]

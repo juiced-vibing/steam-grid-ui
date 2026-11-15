@@ -69,6 +69,8 @@
           <CheckBox x:Name="AnimatedBox" Margin="14,0,0,0" VerticalAlignment="Center" Content="Animated" Click="OnOptionClick" />
           <CheckBox x:Name="HumorBox" Margin="14,0,0,0" VerticalAlignment="Center" Content="Humor" IsChecked="True" Click="OnOptionClick" />
           <CheckBox x:Name="NsfwBox" Margin="14,0,0,0" VerticalAlignment="Center" Content="NSFW" Click="OnOptionClick" />
+          <ComboBox x:Name="MatchBox" Margin="14,0,0,0" MinWidth="200" DisplayMemberPath="Label" Visibility="Collapsed"
+                    ToolTip="The SteamGridDB game this non-Steam game takes its artwork from" />
         </WrapPanel>
 
         <DockPanel x:Name="Actions" DockPanel.Dock="Bottom" Margin="0,6,0,0" LastChildFill="False">

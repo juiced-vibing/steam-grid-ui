@@ -23,6 +23,10 @@ impl Vdf {
         }
     }
 
+    pub fn text(&self, key: &str) -> Option<&str> {
+        self.get(key)?.as_str().filter(|text| !text.is_empty())
+    }
+
     pub fn entries(&self) -> &[(String, Vdf)] {
         match self {
             Vdf::Obj(v) => v,
@@ -139,6 +143,60 @@ pub fn parse(text: &str) -> Result<Vdf, String> {
 pub fn parse_file(path: &std::path::Path) -> Result<Vdf, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     parse(&String::from_utf8_lossy(&bytes))
+}
+
+const BINARY_MAX_DEPTH: usize = 16;
+
+fn binary_text(bytes: &[u8], pos: &mut usize) -> Result<String, String> {
+    let rest = bytes.get(*pos..).unwrap_or_default();
+    let len = rest.iter().position(|&b| b == 0).ok_or("unterminated string")?;
+
+    *pos += len + 1;
+    Ok(String::from_utf8_lossy(&rest[..len]).into_owned())
+}
+
+fn binary_obj(bytes: &[u8], pos: &mut usize, depth: usize) -> Result<Vdf, String> {
+    if depth > BINARY_MAX_DEPTH {
+        return Err("blocks nested too deep".into());
+    }
+
+    let mut items = Vec::new();
+
+    loop {
+        let kind = match bytes.get(*pos) {
+            None if depth == 0 => break,
+            None => return Err("unexpected end of file inside block".into()),
+            Some(kind) => *kind,
+        };
+
+        *pos += 1;
+        if kind == 0x08 {
+            break;
+        }
+
+        let key = binary_text(bytes, pos)?;
+        let value = match kind {
+            0x00 => binary_obj(bytes, pos, depth + 1)?,
+            0x01 => Vdf::Str(binary_text(bytes, pos)?),
+            0x02 => {
+                let raw = bytes.get(*pos..).and_then(|rest| rest.first_chunk::<4>());
+                let raw = raw.ok_or_else(|| format!("key \"{key}\" has no value"))?;
+
+                *pos += 4;
+                Vdf::Str(u32::from_le_bytes(*raw).to_string())
+            }
+
+            other => return Err(format!("key \"{key}\" has a value of unknown type {other}")),
+        };
+
+        items.push((key, value));
+    }
+
+    Ok(Vdf::Obj(items))
+}
+
+pub fn parse_binary(bytes: &[u8]) -> Result<Vdf, String> {
+    binary_obj(bytes, &mut 0, 0)
 }
 
 #[cfg(test)]

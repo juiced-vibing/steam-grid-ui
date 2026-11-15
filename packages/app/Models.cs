@@ -21,6 +21,11 @@ public sealed class GameItem(Game game) : Observable
     public string AppId { get; } = game.Appid;
     public uint Id { get; } = uint.Parse(game.Appid);
     public bool Installed { get; } = game.Installed;
+    public Origin Origin { get; } = game.Origin;
+
+    // the steamgriddb games a shortcut's name finds, and the one in use
+    public List<GameMatch>? Matches { get; set; }
+    public GameMatch? Match { get; set; }
 
     public string? Name
     {
@@ -42,6 +47,7 @@ public sealed class GameItem(Game game) : Observable
         {
             var parts = new List<string>();
 
+            if (Origin == Origin.Shortcut) parts.Add("non-Steam");
             if (!Installed) parts.Add("not installed");
             if (_custom.Count > 0) parts.Add("custom: " + string.Join(", ", Enum.GetValues<Slot>().Where(_custom.Contains).Select(s => s.Label())));
 

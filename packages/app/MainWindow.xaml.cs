@@ -40,6 +40,7 @@ public partial class MainWindow : Window
         AssetsList.SelectionChanged += (_, _) => UpdateButtons();
         SearchBox.TextChanged += (_, _) => RefreshFilter();
         SortBox.SelectionChanged += (_, _) => ApplySort();
+        MatchBox.SelectionChanged += (_, _) => Run(PickMatch);
     }
 
     private ArtKind Kind => (ArtKind)((ComboBoxItem)KindBox.SelectedItem).Tag;
@@ -175,6 +176,33 @@ public partial class MainWindow : Window
 
     private void OnMore(object sender, RoutedEventArgs e) => Run(() => LoadAssets(append: true));
 
+    private void ShowMatches(GameItem? game)
+    {
+        MatchBox.ItemsSource = game?.Matches;
+        MatchBox.SelectedItem = game?.Match;
+        MatchBox.Visibility = game?.Matches is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async Task PickMatch()
+    {
+        if (Current is not { Game: var game } || MatchBox.SelectedItem is not GameMatch match || match == game.Match) return;
+
+        game.Match = match;
+        await Native.Send(new RememberMatch(game.AppId, match.Id));
+        await LoadAssets(append: false);
+    }
+
+    // a steam game is known by its appid; a shortcut only has a name to search for
+    private static async Task<GameRef?> Resolve(GameItem game)
+    {
+        if (game.Origin == Origin.Steam) return new GameRef.Steam(game.AppId);
+
+        game.Matches ??= await Native.Send(new FindGame(game.AppId, game.Display));
+        game.Match ??= game.Matches.FirstOrDefault();
+
+        return game.Match is { } match ? new GameRef.Sgdb(match.Id) : null;
+    }
+
     private async Task LoadAssets(bool append)
     {
         MoreBtn.IsEnabled = false;
@@ -184,6 +212,7 @@ public partial class MainWindow : Window
             _generation++;
             _page = 0;
             _assets.Clear();
+            ShowMatches(Current?.Game);
         }
 
         UpdateButtons();
@@ -196,8 +225,18 @@ public partial class MainWindow : Window
         AssetPage reply;
         try
         {
+            var game = await Resolve(target.Game);
+            if (generation != _generation) return;
+
+            ShowMatches(target.Game);
+            if (game is null)
+            {
+                SetStatus($"SteamGridDB has no game named {target.Game.Display}. Rename the shortcut in Steam to search for another name.");
+                return;
+            }
+
             reply = await Native.Send(new ListAssets(
-                target.Game.AppId,
+                game,
                 target.Kind,
                 page,
                 Animated: AnimatedBox.IsChecked == true,

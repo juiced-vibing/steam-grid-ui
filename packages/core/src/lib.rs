@@ -24,14 +24,53 @@ use crate::protocol::InitReply;
 use crate::protocol::PathReply;
 use crate::protocol::Request;
 use crate::protocol::SteamState;
+use crate::sgdb::Filters;
+use crate::sgdb::Match;
 use crate::steam::Steam;
 use crate::types::ApiKey;
+use crate::types::AppId;
+use crate::types::ArtKind;
+use crate::types::GameId;
+use crate::types::GameRef;
 
 const THUMB_CACHE_MAX: u64 = 256 * 1024 * 1024;
 const KEY_CHECK_APP: u32 = 440;
 
 fn reply<T: Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).map_err(|_| Error::Internal)
+}
+
+fn find_game(appid: AppId, name: &str) -> Result<Vec<Match>> {
+    let key = store::api_key().ok_or(Error::NoApiKey)?;
+    let mut matches = sgdb::search(&key, name)?;
+
+    // the one picked before leads, the rest keep steamgriddb's order
+    let picked = store::load_map::<GameId>(store::MATCHES).remove(&appid);
+    if let Some(at) = matches.iter().position(|found| Some(found.id) == picked) {
+        matches[..=at].rotate_right(1);
+    }
+
+    Ok(matches)
+}
+
+fn list_assets(game: GameRef, kind: ArtKind, page: u32, filters: Filters, need_name: bool) -> Result<AssetPage> {
+    let key = store::api_key().ok_or(Error::NoApiKey)?;
+
+    let game_name = match game {
+        GameRef::Steam { appid } if need_name => sgdb::game_name(&key, appid)?.inspect(|name| {
+            store::remember(store::NAMES, appid, name.clone());
+        }),
+        _ => None,
+    };
+
+    Ok(match sgdb::assets(&key, game, kind, page, filters)? {
+        Some(page) => AssetPage::Known {
+            items: page.items,
+            more: page.more,
+            game_name,
+        },
+        None => AssetPage::Unknown { game_name },
+    })
 }
 
 fn handle(request: Request) -> Result<String> {
@@ -70,32 +109,23 @@ fn handle(request: Request) -> Result<String> {
 
         Request::ListGames { user } => {
             let steam = Steam::locate(&store::load_config())?;
-            reply(&steam.games(user, &store::load_names()))
+            reply(&steam.games(user, &store::load_map(store::NAMES)))
+        }
+
+        Request::FindGame { appid, name } => reply(&find_game(appid, &name)?),
+
+        Request::RememberMatch { appid, id } => {
+            store::remember(store::MATCHES, appid, id);
+            reply(&())
         }
 
         Request::ListAssets {
-            appid,
+            game,
             kind,
             page,
             filters,
             need_name,
-        } => {
-            let key = store::api_key().ok_or(Error::NoApiKey)?;
-
-            let game_name = if need_name { sgdb::game_name(&key, appid)? } else { None };
-            if let Some(name) = &game_name {
-                store::remember_name(appid, name);
-            }
-
-            reply(&match sgdb::assets(&key, appid, kind, page, filters)? {
-                Some(page) => AssetPage::Known {
-                    items: page.items,
-                    more: page.more,
-                    game_name,
-                },
-                None => AssetPage::Unknown { game_name },
-            })
-        }
+        } => reply(&list_assets(game, kind, page, filters, need_name)?),
 
         Request::Thumb { url } => {
             let name = url

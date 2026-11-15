@@ -9,6 +9,8 @@ use crate::steam::User;
 use crate::types::AppId;
 use crate::types::ArtKind;
 use crate::types::AssetUrl;
+use crate::types::GameId;
+use crate::types::GameRef;
 use crate::types::Slot;
 use crate::types::UserId;
 
@@ -22,8 +24,16 @@ pub enum Request {
     ListGames {
         user: UserId,
     },
-    ListAssets {
+    FindGame {
         appid: AppId,
+        name: String,
+    },
+    RememberMatch {
+        appid: AppId,
+        id: GameId,
+    },
+    ListAssets {
+        game: GameRef,
         kind: ArtKind,
         #[serde(default)]
         page: u32,

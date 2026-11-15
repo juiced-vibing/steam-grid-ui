@@ -30,7 +30,7 @@ fn a_missing_folder_is_not_a_steam_install() {
 }
 
 #[test]
-fn games_come_from_manifests_and_the_local_config() {
+fn games_come_from_manifests_the_local_config_and_shortcuts() {
     let root = scratch("library");
     let other = scratch("library_other");
     let vdf_path = |path: &Path| path.display().to_string().replace('\\', "\\\\");
@@ -59,6 +59,15 @@ fn games_come_from_manifests_and_the_local_config() {
         &root.join("userdata/7/config/localconfig.vdf"),
         r#""UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "440" { } "70" { } "80" { } } } } } }"#,
     );
+    fs::write(
+        root.join("userdata/7/config/shortcuts.vdf"),
+        b"\0shortcuts\0\
+            \x000\0\x02appid\0\x01\0\0\x80\x01AppName\0Celeste\0\x08\
+            \x001\0\x01appname\0no appid, so no art to name\0\x08\
+            \x08\x08",
+    )
+    .unwrap();
+    write(&root.join("userdata/7/config/grid/2147483649_logo.png"), "art");
     write(&root.join("userdata/7/config/grid/440p.png"), "art");
     write(&root.join("userdata/7/config/grid/440_hero.JPG"), "art");
     write(&root.join("userdata/7/config/grid/440_logo.json"), "position, not art");
@@ -71,11 +80,17 @@ fn games_come_from_manifests_and_the_local_config() {
         appid: id.into(),
         name: name.map(str::to_string),
         installed,
+        origin: if id > 0x8000_0000 {
+            Origin::Shortcut
+        } else {
+            Origin::Steam
+        },
         custom: custom.to_vec(),
     };
     assert_eq!(
         games,
         [
+            game(0x8000_0001, Some("Celeste"), true, &[Slot::Logo]),
             game(10, Some("Counter-Strike"), true, &[]),
             game(70, Some("Half-Life"), false, &[]),
             game(440, Some("Team Fortress 2"), true, &[Slot::Grid, Slot::Hero]),

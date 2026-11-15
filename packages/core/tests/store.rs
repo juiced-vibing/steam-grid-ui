@@ -38,3 +38,24 @@ fn prune_dir_drops_the_oldest_files_first() {
 
     fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn remembered_values_survive_and_are_replaced() {
+    let path = std::env::temp_dir().join(format!("sgdb_core_remember_{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let read = || read_json::<HashMap<AppId, String>>(&path);
+
+    remember_in(&path, 70.into(), "Half-Life".to_string());
+    remember_in(&path, 80.into(), "Condition Zero".to_string());
+    remember_in(&path, 70.into(), "Half-Life (1998)".to_string());
+    assert_eq!(read().len(), 2);
+    assert_eq!(read()[&AppId::from(70)], "Half-Life (1998)");
+
+    // a file that cannot be read is started over, not an error
+    fs::write(&path, "{ not json").unwrap();
+    assert!(read().is_empty());
+    remember_in(&path, 70.into(), "Half-Life".to_string());
+    assert_eq!(read().len(), 1);
+
+    fs::remove_file(&path).unwrap();
+}

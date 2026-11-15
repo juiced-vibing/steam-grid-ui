@@ -19,6 +19,8 @@ use crate::types::ApiKey;
 use crate::types::AppId;
 use crate::types::ArtKind;
 use crate::types::AssetUrl;
+use crate::types::GameId;
+use crate::types::GameRef;
 
 const BASE: &str = "https://www.steamgriddb.com/api/v2";
 const USER_AGENT: &str = "SteamGridUI/0.1";
@@ -147,6 +149,59 @@ pub fn game_name(key: &ApiKey, app: AppId) -> Result<Option<String>> {
         .map(str::to_string))
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Match {
+    pub id: GameId,
+    pub name: String,
+    pub year: Option<i64>,
+}
+
+impl Match {
+    fn parse(raw: &Value) -> Option<Self> {
+        Some(Self {
+            id: u32::try_from(raw.get("id")?.as_u64()?).ok()?.into(),
+            name: raw.get("name")?.as_str().filter(|name| !name.is_empty())?.to_string(),
+            year: raw.get("release_date").and_then(Value::as_i64).map(year_of),
+        })
+    }
+}
+
+fn year_of(unix_secs: i64) -> i64 {
+    let day = unix_secs.div_euclid(86_400) + 719_468;
+    let (era, day_of_era) = (day.div_euclid(146_097), day.rem_euclid(146_097));
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+
+    era * 400 + year_of_era + i64::from(day_of_year >= 306)
+}
+
+fn path_segment(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => char::from(b).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+pub fn search(key: &ApiKey, term: &str) -> Result<Vec<Match>> {
+    let term = term.trim();
+    if term.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let body = get(key, &format!("/search/autocomplete/{}", path_segment(term)), &[])?;
+
+    Ok(body
+        .as_ref()
+        .and_then(|body| body.get("data"))
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter_map(Match::parse)
+        .collect())
+}
+
 const fn endpoint(kind: ArtKind) -> (&'static str, Option<&'static str>) {
     match kind {
         ArtKind::Grid => ("grids", Some("600x900,342x482,660x930")),
@@ -162,7 +217,7 @@ fn page_key(path: &str, query: &[(&str, &str)]) -> String {
     format!("{path}?{}", pairs.join("&"))
 }
 
-pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filters) -> Result<Option<Page>> {
+pub fn assets(key: &ApiKey, game: GameRef, kind: ArtKind, page: u32, filters: Filters) -> Result<Option<Page>> {
     let (endpoint, dimensions) = endpoint(kind);
 
     let page = page.to_string();
@@ -176,7 +231,7 @@ pub fn assets(key: &ApiKey, app: AppId, kind: ArtKind, page: u32, filters: Filte
         query.push(("dimensions", dimensions));
     }
 
-    let path = format!("/{endpoint}/steam/{app}");
+    let path = format!("/{endpoint}/{}", game.api_path());
     let cache_key = page_key(&path, &query);
     if let Some(page) = cache::lookup(&cache_key) {
         return Ok(Some(page));

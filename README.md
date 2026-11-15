@@ -1,6 +1,6 @@
 # <img src="assets/app/main.png" alt="steam-grid-ui icon" height="28" width="28"> SteamGridUI
 
-Windows app that browses [SteamGridDB](https://www.steamgriddb.com/) artwork for the games in your Steam library and applies it: portrait and wide grids, heroes and logos. Icons can be saved to disk.
+Windows app that browses [SteamGridDB](https://www.steamgriddb.com/) artwork for the games in your Steam library, non-Steam shortcuts included, and applies it: portrait and wide grids, heroes and logos. Icons can be saved to disk.
 
 The backend is a Rust DLL (`packages/core`) that reads the local Steam install and talks to the SteamGridDB API. The frontend is a WPF window (`packages/app`) that calls it over P/Invoke.
 
@@ -55,6 +55,7 @@ The key can also come from a `.env` at the repo root (see `.env.example`) or the
 | ------------------- | ---------------------------------------------------------------------- |
 | installed games     | `steamapps/appmanifest_*.acf` in every library folder                  |
 | other owned games   | `userdata/<id>/config/localconfig.vdf`, named on first lookup          |
+| non-Steam games     | `userdata/<id>/config/shortcuts.vdf`, matched to SteamGridDB by name   |
 | applied artwork     | `userdata/<id>/config/grid/` (`<appid>p`, `<appid>`, `_hero`, `_logo`) |
 | replaced artwork    | moved to `%APPDATA%\SteamGridUI\backup\`, never deleted                |
 | key, cache, backups | `%APPDATA%\SteamGridUI\`                                               |
@@ -62,6 +63,6 @@ The key can also come from a `.env` at the repo root (see `.env.example`) or the
 Restart Steam if the library does not pick up a change.
 
 > [!NOTE]
-> Steam has no custom icon slot for its own games, so icons are download-only. Animated artwork is listed without a preview.
+> Steam has no custom icon slot for its own games, so icons are download-only. Animated artwork is listed without a preview. A non-Steam game is searched for under the name it has in Steam; rename the shortcut there if SteamGridDB knows it under another one.
 
 Not affiliated with Valve or SteamGridDB.

@@ -19,7 +19,7 @@ use crate::types::Slot;
 use crate::types::UserId;
 use crate::vdf;
 
-const HIDDEN_APPS: &[u32] = &[228_980];
+const HIDDEN_APPS: &[AppId] = &[AppId::new(228_980)];
 
 #[derive(Debug, Serialize)]
 pub struct User {
@@ -27,11 +27,19 @@ pub struct User {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    Steam,
+    Shortcut,
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Game {
     pub appid: AppId,
     pub name: Option<String>,
     pub installed: bool,
+    pub origin: Origin,
     pub custom: Vec<Slot>,
 }
 
@@ -140,9 +148,39 @@ impl Steam {
         libs
     }
 
+    fn user_config(&self, user: UserId) -> PathBuf {
+        self.root.join("userdata").join(user.to_string()).join("config")
+    }
+
+    fn shortcuts(&self, user: UserId) -> Vec<(u32, String)> {
+        let Ok(bytes) = fs::read(self.user_config(user).join("shortcuts.vdf")) else {
+            return Vec::new();
+        };
+        let Ok(v) = vdf::parse_binary(&bytes) else {
+            return Vec::new();
+        };
+
+        v.get("shortcuts")
+            .map_or(&[][..], vdf::Vdf::entries)
+            .iter()
+            .filter_map(|(_, shortcut)| {
+                let id = shortcut.text("appid")?.parse().ok()?;
+                Some((id, shortcut.text("AppName")?.to_string()))
+            })
+            .collect()
+    }
+
     pub fn games(&self, user: UserId, names: &HashMap<AppId, String>) -> Vec<Game> {
-        // appid -> (name, installed)
-        let mut found: BTreeMap<u32, (Option<String>, bool)> = BTreeMap::new();
+        let mut found: BTreeMap<u32, Game> = BTreeMap::new();
+        let mut add = |id: u32, name: Option<String>, installed, origin| {
+            found.entry(id).or_insert(Game {
+                appid: id.into(),
+                name,
+                installed,
+                origin,
+                custom: Vec::new(),
+            });
+        };
 
         for lib in self.libraries() {
             let Ok(dir) = fs::read_dir(lib.join("steamapps")) else {
@@ -163,55 +201,38 @@ impl Steam {
                 };
 
                 let Some(state) = v.get("AppState") else { continue };
-                let Some(id) = state
-                    .get("appid")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse::<u32>().ok())
-                else {
+                let Some(id) = state.text("appid").and_then(|s| s.parse::<u32>().ok()) else {
                     continue;
                 };
 
-                let name = state
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .filter(|name| !name.is_empty());
-                found.insert(id, (name.map(str::to_string), true));
+                add(id, state.text("name").map(str::to_string), true, Origin::Steam);
             }
         }
 
-        let local = self
-            .root
-            .join("userdata")
-            .join(user.to_string())
-            .join("config")
-            .join("localconfig.vdf");
-        if let Ok(v) = vdf::parse_file(&local) {
+        if let Ok(v) = vdf::parse_file(&self.user_config(user).join("localconfig.vdf")) {
             let apps = v.path(&["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"]);
             for (key, _) in apps.map_or(&[][..], vdf::Vdf::entries) {
                 if let Ok(id) = key.parse::<u32>() {
-                    found
-                        .entry(id)
-                        .or_insert_with(|| (names.get(&id.into()).cloned(), false));
+                    add(id, names.get(&id.into()).cloned(), false, Origin::Steam);
                 }
             }
+        }
+
+        for (id, name) in self.shortcuts(user) {
+            add(id, Some(name), true, Origin::Shortcut);
         }
 
         let art = self.grid(user, Path::new("")).art_stems();
 
         let mut out: Vec<Game> = found
-            .into_iter()
-            .filter(|(id, _)| !HIDDEN_APPS.contains(id))
-            .map(|(id, (name, installed))| {
-                let appid = AppId::from(id);
-                Game {
-                    appid,
-                    name,
-                    installed,
-                    custom: Slot::ALL
-                        .into_iter()
-                        .filter(|slot| art.contains(&slot.file_stem(appid)))
-                        .collect(),
-                }
+            .into_values()
+            .filter(|game| !HIDDEN_APPS.contains(&game.appid))
+            .map(|mut game| {
+                game.custom = Slot::ALL
+                    .into_iter()
+                    .filter(|slot| art.contains(&slot.file_stem(game.appid)))
+                    .collect();
+                game
             })
             .collect();
 
@@ -221,11 +242,7 @@ impl Steam {
     }
 
     pub fn grid(&self, user: UserId, backup_root: &Path) -> GridDir {
-        let user = user.to_string();
-        GridDir::new(
-            self.root.join("userdata").join(&user).join("config").join("grid"),
-            backup_root.join(user),
-        )
+        GridDir::new(self.user_config(user).join("grid"), backup_root.join(user.to_string()))
     }
 }
 

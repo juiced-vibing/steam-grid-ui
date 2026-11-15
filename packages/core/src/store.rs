@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::error::Error;
 use crate::error::Result;
@@ -16,7 +17,10 @@ use crate::types::AppId;
 
 const KEY_VAR: &str = "SGDB_API_KEY";
 
-static NAMES_LOCK: Mutex<()> = Mutex::new(());
+pub const NAMES: &str = "names.json";
+pub const MATCHES: &str = "matches.json";
+
+static MAPS_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn app_dir() -> PathBuf {
     let base = std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
@@ -40,10 +44,7 @@ pub struct Config {
 }
 
 pub fn load_config() -> Config {
-    fs::read_to_string(app_dir().join("config.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    read_json(&app_dir().join("config.json"))
 }
 
 pub fn save_config(cfg: &Config) -> Result<()> {
@@ -51,24 +52,32 @@ pub fn save_config(cfg: &Config) -> Result<()> {
     fs::write(app_dir().join("config.json"), text).map_err(Error::io("saving the settings"))
 }
 
-pub fn load_names() -> HashMap<AppId, String> {
-    fs::read_to_string(app_dir().join("names.json"))
+fn read_json<T: DeserializeOwned + Default>(path: &Path) -> T {
+    fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-pub fn remember_name(app: AppId, name: &str) {
-    let _guard = NAMES_LOCK.lock();
+pub fn load_map<V: DeserializeOwned>(file: &str) -> HashMap<AppId, V> {
+    read_json(&app_dir().join(file))
+}
 
-    let mut names = load_names();
-    if names.get(&app).map(String::as_str) == Some(name) {
+pub fn remember<V: Serialize + DeserializeOwned + PartialEq>(file: &str, app: AppId, value: V) {
+    remember_in(&app_dir().join(file), app, value);
+}
+
+fn remember_in<V: Serialize + DeserializeOwned + PartialEq>(path: &Path, app: AppId, value: V) {
+    let _guard = MAPS_LOCK.lock();
+
+    let mut map: HashMap<AppId, V> = read_json(path);
+    if map.get(&app) == Some(&value) {
         return;
     }
 
-    names.insert(app, name.to_string());
-    if let Ok(text) = serde_json::to_string(&names) {
-        let _ = fs::write(app_dir().join("names.json"), text);
+    map.insert(app, value);
+    if let Ok(text) = serde_json::to_string(&map) {
+        let _ = fs::write(path, text);
     }
 }
 

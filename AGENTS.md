@@ -11,14 +11,14 @@ steam-grid-ui is a Windows app that browses SteamGridDB artwork for the games in
 | `packages/core/`                | Rust `cdylib` (`sgdb_core.dll`): all logic and I/O                                  |
 | `packages/core/src/lib.rs`      | the C ABI (`sgdb_call`, `sgdb_free`) and the handler of each request                |
 | `packages/core/src/protocol.rs` | the `Request` enum and the reply types, mirrored by `Protocol.cs`                   |
-| `packages/core/src/types.rs`    | values checked once where they enter: ids, `ApiKey`, `Slot`, `AssetUrl`             |
+| `packages/core/src/types.rs`    | values checked once where they enter: ids, `ApiKey`, `Slot`, `AssetUrl`, `GameRef`  |
 | `packages/core/src/error.rs`    | the one `Error` enum (thiserror); each variant has a user message and a stable code |
-| `packages/core/src/steam.rs`    | `Steam`: the install, its accounts and the library                                  |
+| `packages/core/src/steam.rs`    | `Steam`: the install, its accounts and the library (Steam games and shortcuts)      |
 | `packages/core/src/grid.rs`     | `GridDir`: the art slots of one account and their backups                           |
-| `packages/core/src/sgdb.rs`     | SteamGridDB API v2 client and downloads                                             |
+| `packages/core/src/sgdb.rs`     | SteamGridDB API v2 client (artwork, search by name) and downloads                   |
 | `packages/core/src/cache.rs`    | artwork pages kept in memory for ten minutes                                        |
-| `packages/core/src/store.rs`    | `%APPDATA%\SteamGridUI`: config, name cache, thumbnails; API key lookup (`.env`)    |
-| `packages/core/src/vdf.rs`      | parser for Valve's text KeyValues files (`.vdf`, `.acf`)                            |
+| `packages/core/src/store.rs`    | `%APPDATA%\SteamGridUI`: config, remembered names and matches, thumbnails; API key  |
+| `packages/core/src/vdf.rs`      | parser for Valve's KeyValues files: text (`.vdf`, `.acf`) and binary (shortcuts)    |
 | `packages/core/tests/`          | the unit tests of each module                                                       |
 | `packages/app/`                 | WPF frontend, net10, fluent theme, plain code-behind (no MVVM)                      |
 | `packages/app/Protocol.cs`      | the C# mirror of the core's requests, replies and error codes                       |
@@ -57,7 +57,7 @@ The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses un
 - Tests are for edge cases and invariants (bad input, limits, what must not happen), not for restating the code. The C# side has none: keep logic in the core.
 - Files: split a file when it holds two responsibilities, not at a line count; around 250 lines is the point to check.
 - Comments: no docstrings on anything that is not public API, and few comments at all. A short `//` line only where the reason is not obvious from the code; lower case, no trailing period.
-- Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId` and `UserId` are numbers, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums with data (`Placed`, `AssetPage`, `SteamState`, `Preview`) rather than flags and nullable fields.
+- Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId`, `UserId` and `GameId` are numbers, a `GameRef` is a Steam appid or a SteamGridDB game id, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums with data (`Placed`, `AssetPage`, `SteamState`, `Preview`) rather than flags and nullable fields.
 - Errors: return `error::Result`, add context with `Error::io("doing what")`. The message is shown to the user as it is, so word it for a person. The frontend decides what to do from the code, never from the message, and handles every failure in `MainWindow.Report`.
 - Replaced or removed artwork is moved to the backup folder, never deleted; the newest three per slot are kept.
 - Workflows and scripts: one command per line, no `\` continuations.

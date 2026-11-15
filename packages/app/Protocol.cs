@@ -6,6 +6,8 @@ public enum ArtKind { Grid, Wide, Hero, Logo, Icon }
 
 public enum Slot { Grid, Wide, Hero, Logo }
 
+public enum Origin { Steam, Shortcut }
+
 public static class ArtKinds
 {
     public static Slot? Slot(this ArtKind kind) => kind switch
@@ -39,7 +41,11 @@ public sealed record SetApiKey(string Key) : Request<Nothing>("set_api_key");
 
 public sealed record ListGames(string User) : Request<List<Game>>("list_games");
 
-public sealed record ListAssets(string Appid, ArtKind Kind, int Page, bool Animated, bool Nsfw, bool Humor, bool NeedName)
+public sealed record FindGame(string Appid, string Name) : Request<List<GameMatch>>("find_game");
+
+public sealed record RememberMatch(string Appid, string Id) : Request<Nothing>("remember_match");
+
+public sealed record ListAssets(GameRef Game, ArtKind Kind, int Page, bool Animated, bool Nsfw, bool Humor, bool NeedName)
     : Request<AssetPage>("list_assets");
 
 public sealed record Thumb(string Url) : Request<PathReply>("thumb");
@@ -71,7 +77,23 @@ public abstract record SteamState
 
 public sealed record User(string Id, string Name);
 
-public sealed record Game(string Appid, string? Name, bool Installed, List<Slot> Custom);
+public sealed record Game(string Appid, string? Name, bool Installed, Origin Origin, List<Slot> Custom);
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "by")]
+[JsonDerivedType(typeof(Steam), "steam")]
+[JsonDerivedType(typeof(Sgdb), "sgdb")]
+public abstract record GameRef
+{
+    public sealed record Steam(string Appid) : GameRef;
+
+    public sealed record Sgdb(string Id) : GameRef;
+}
+
+public sealed record GameMatch(string Id, string Name, int? Year)
+{
+    [JsonIgnore]
+    public string Label => Year is { } year ? $"{Name} ({year})" : Name;
+}
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "state")]
 [JsonDerivedType(typeof(Known), "known")]
