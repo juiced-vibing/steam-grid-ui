@@ -2,6 +2,13 @@
 
 All notable changes to steam-grid-ui.
 
+## [0.1.5] - 2026-11-15
+
+### Changed
+
+- Even spacing throughout the main window and the API key dialog
+- Captions, placeholders and error text follow the light or dark theme instead of fixed colours
+
 ## [0.1.4] - 2026-11-15
 
 ### Changed
