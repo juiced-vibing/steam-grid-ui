@@ -21,6 +21,7 @@ steam-grid-ui is a Windows app that browses SteamGridDB artwork for the games in
 | `packages/core/src/vdf.rs`      | parser for Valve's KeyValues files: text (`.vdf`, `.acf`) and binary (shortcuts)    |
 | `packages/core/tests/`          | the unit tests of each module                                                       |
 | `packages/app/`                 | WPF frontend, net10, fluent theme, plain code-behind (no MVVM)                      |
+| `packages/app/MainWindow.*.cs`  | the window in three parts: shared plumbing, the library list, the artwork list      |
 | `packages/app/Protocol.cs`      | the C# mirror of the core's requests, replies and error codes                       |
 | `packages/app/Native.cs`        | the P/Invoke side: `Native.Send(request)`                                           |
 | `assets/`                       | `app/` the icon (`main.ico`, `main.png`), `installer/` the setup wizard images      |
