@@ -2,6 +2,12 @@
 
 All notable changes to steam-grid-ui.
 
+## [0.1.2] - 2026-11-15
+
+### Added
+
+- "Show IDs instead of names" swaps the two lines of every game in the list
+
 ## [0.1.1] - 2026-11-15
 
 ### Added
