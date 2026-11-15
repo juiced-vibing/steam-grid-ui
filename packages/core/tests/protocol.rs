@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 use serde_json::json;
 
@@ -57,4 +59,20 @@ fn invalid_requests_do_not_parse() {
     assert!(list(json!({ "by": "sgdb", "id": "5248/../1" }), "grid").is_err());
     assert!(list(json!({ "by": "name", "name": "Celeste" }), "grid").is_err());
     assert!(parse("nope", &json!({})).is_err());
+}
+
+#[test]
+fn the_csharp_mirror_names_every_request() {
+    let mirrored: BTreeSet<&str> = include_str!("../../app/Protocol.cs")
+        .lines()
+        .filter(|line| line.contains(": Request<"))
+        .filter_map(|line| line.rsplit_once("(\"")?.1.split('"').next())
+        .collect();
+
+    // serde lists the variants it knows when it meets one it does not
+    let unknown = parse("?", &json!({})).unwrap_err().to_string();
+    let known: BTreeSet<&str> = unknown.split('`').skip(3).step_by(2).collect();
+
+    assert!(known.contains("list_assets"), "{unknown}");
+    assert_eq!(mirrored, known);
 }
