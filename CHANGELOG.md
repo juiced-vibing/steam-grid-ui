@@ -2,6 +2,12 @@
 
 All notable changes to steam-grid-ui.
 
+## [0.1.1] - 2026-11-15
+
+### Added
+
+- Sort the game list by name or by ID
+
 ## [0.1.0] - 2026-11-14
 
 ### Added
