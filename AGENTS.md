@@ -46,6 +46,7 @@ prek install             # once
 prek run --all-files     # everything above, plus taplo, zizmor and shfmt
 scripts/pin-actions.sh   # pin workflow actions to commit hashes (needs pinact)
 scripts/build-installer.ps1 -Version 0.1.0   # dist/SteamGridUI-0.1.0-setup.exe (needs inno setup)
+scripts/clean.ps1        # remove build output; -All also removes the rust target folder (clean.sh: --all)
 ```
 
 The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses unstable options. Close the running app before rebuilding: it locks `sgdb_core.dll`.
@@ -57,7 +58,7 @@ The toolchain is nightly (`rust-toolchain.toml`), because `rustfmt.toml` uses un
 - Tests are for edge cases and invariants (bad input, limits, what must not happen), not for restating the code. The C# side has none: keep logic in the core.
 - Files: split a file when it holds two responsibilities, not at a line count; around 250 lines is the point to check.
 - Comments: no docstrings on anything that is not public API, and few comments at all. A short `//` line only where the reason is not obvious from the code; lower case, no trailing period.
-- Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId`, `UserId` and `GameId` are numbers, a `GameRef` is a Steam appid or a SteamGridDB game id, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums with data (`Placed`, `AssetPage`, `SteamState`, `Preview`) rather than flags and nullable fields.
+- Make invalid states unrepresentable instead of checking for them. A value is validated once, by its type, when a request is parsed: `AppId`, `UserId` and `GameId` are numbers, a `GameRef` is a Steam appid or a SteamGridDB game id, an `AssetUrl` is an https steamgriddb.com URL, a `Slot` is never an icon, an `ApiKey` is never empty. Code that receives one does not check again. Use enums (`Placed`, `AssetPage`, `SteamState`, `Source`, `Preview`) rather than flags and nullable fields.
 - Errors: return `error::Result`, add context with `Error::io("doing what")`. The message is shown to the user as it is, so word it for a person. The frontend decides what to do from the code, never from the message, and handles every failure in `MainWindow.Report`.
 - Replaced or removed artwork is moved to the backup folder, never deleted; the newest three per slot are kept.
 - Workflows and scripts: one command per line, no `\` continuations.
