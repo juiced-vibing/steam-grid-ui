@@ -2,6 +2,12 @@
 
 All notable changes to steam-grid-ui.
 
+## [0.1.4] - 2026-11-15
+
+### Changed
+
+- Maintenance release: nothing changes in how the app looks or behaves
+
 ## [0.1.3] - 2026-11-15
 
 ### Added
